@@ -15,7 +15,7 @@ CODESIGN_IDENTITY ?= -
 
 CC := clang
 CFLAGS ?= -fobjc-arc -Wall -Wextra
-LDLIBS ?= -framework Foundation -framework Security
+LDLIBS ?= -framework Foundation -framework Security -framework AppKit -framework Cocoa
 CODESIGN ?= codesign
 
 .PHONY: build install clean

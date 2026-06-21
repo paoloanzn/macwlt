@@ -4,28 +4,49 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
-#import <Security/Security.h>
+#import <stdlib.h>
+#import "WalletViewController.h"
 
-#import "hex.h"
-#import "SEKeyManager.h"
+#define WINDOW_NAME "Macwlt"
+#define APP_NAME    "macwlt"
+
+// error helper, logs and exit(1).
+void die(NSError *err, NSString *errMsg) {
+    NSInteger returnedErrorCode = 1;
+    NSString *loggedErrorString = nil;
+
+    if (errMsg) loggedErrorString = errMsg;
+    if (err) { loggedErrorString = [err localizedDescription]; returnedErrorCode = [err code]; }
+
+    NSLog(@"%@: error: %@; abort;", @APP_NAME, loggedErrorString);
+    exit(returnedErrorCode);
+}
 
 int main(void) {
     @autoreleasepool {
-        NSError *error = nil;
-        SecKeyRef key = [SEKeyManager copyKeyWithError:&error];
-        if (!key) { NSLog(@"%@", error); return 1; }
+        NSApplication *app = [NSApplication sharedApplication];
+        BOOL success = [app setActivationPolicy:NSApplicationActivationPolicyRegular];
+        if (!success) die(NULL, @"Failed to set ActivationPolicy");
 
-        NSData *msg = [@"Message" dataUsingEncoding:NSUTF8StringEncoding];
-        CFErrorRef sigError = NULL;
-        NSData *sig = CFBridgingRelease(SecKeyCreateSignature(
-            key, kSecKeyAlgorithmECDSASignatureMessageX962SHA256,
-            (__bridge CFDataRef)msg, &sigError
-        ));
-        if (!sig) { NSLog(@"%@", (__bridge NSError *)sigError); CFRelease(key); return 1; }
+        NSRect contentRect = NSMakeRect(0, 0, 520, 220);
+        WalletViewController *walletViewController = [WalletViewController new];
+        walletViewController.preferredContentSize = contentRect.size;
 
-        printf("SESignedMessage=%s\n", hex(sig).UTF8String);
-        CFRelease(key);
+        NSWindow *win = [[NSWindow alloc]
+            initWithContentRect:contentRect
+            styleMask:(NSWindowStyleMaskTitled |
+                       NSWindowStyleMaskClosable) 
+            backing:(NSBackingStoreBuffered) 
+            defer:NO
+        ];
+        win.contentViewController = walletViewController;
+        win.title = @WINDOW_NAME;
+        [win center];
+        [win makeKeyAndOrderFront:nil];
+        [app activateIgnoringOtherApps:YES];
+        [app run];
     }
     return 0;
 }
