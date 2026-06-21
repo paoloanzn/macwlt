@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#import "se-key.h"
+#import "SEKeyManager.h"
 
 #define WALLET_TAG "app.macwlt.signing.v1"
 

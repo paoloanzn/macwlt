@@ -8,7 +8,7 @@
 #import <Security/Security.h>
 
 #import "hex.h"
-#import "se-key.h"
+#import "SEKeyManager.h"
 
 int main(void) {
     @autoreleasepool {
