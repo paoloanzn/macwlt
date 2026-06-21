@@ -6,6 +6,7 @@
 
 #import "hex.h"
 
+// Returns hex representation as a string of N bytes.
 NSString *hex(NSData *d) {
     NSMutableString *s = [NSMutableString stringWithCapacity:d.length * 2];
     const uint8_t *b = d.bytes;
