@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#import "mnemonics.h"
+#import "Mnemonic.h"
 #include <stdint.h>
 #include <zlib.h>
 #import <Security/Security.h>
@@ -72,7 +72,9 @@ static NSArray<NSString *> *loadWordlist(void) {
     return gWordlist;
 }
 
-NSArray<NSString *> *generateMnemonic(int entropyBits) {
+@implementation Mnemonic
+
++ (NSArray<NSString *> *)generateWithEntropyBits:(int)entropyBits {
     // BIP-39 entropy is 128–256 bits in 32-bit steps.
     if (entropyBits < 128 || entropyBits > 256 || entropyBits % 32 != 0) return nil;
 
@@ -116,7 +118,8 @@ NSArray<NSString *> *generateMnemonic(int entropyBits) {
     return out;
 }
 
-NSData *mnemonicToSeed(NSArray<NSString *> *words, NSString *passphrase) {
++ (NSData *)seedFromWords:(NSArray<NSString *> *)words
+               passphrase:(NSString *)passphrase {
     NSString *passStr = [[words componentsJoinedByString:@" "]
         decomposedStringWithCompatibilityMapping];
     NSString *saltStr = [[NSString stringWithFormat:@"mnemonic%@", passphrase ?: @""]
@@ -132,3 +135,5 @@ NSData *mnemonicToSeed(NSArray<NSString *> *words, NSString *passphrase) {
     if (rc != kCCSuccess) return nil;
     return [NSData dataWithBytes:out length:sizeof(out)];
 }
+
+@end
