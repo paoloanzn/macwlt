@@ -13,8 +13,8 @@
 // RIPEMD-160 (Dobbertin–Bosselaers–Preneel).
 //
 // CommonCrypto ships SHA-2 but not RIPEMD-160, so the second half of Bitcoin's
-// HASH160 needs its own implementation. This is a small, self-contained C
-// routine in the spirit of the project's other crypto primitives.
+// HASH160 needs another source. This thin wrapper delegates to OpenSSL's
+// libcrypto, keeping a project-local signature for callers.
 
 #define RIPEMD160_DIGEST_LENGTH 20
 

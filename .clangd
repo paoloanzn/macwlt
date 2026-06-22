@@ -1,6 +1,7 @@
 CompileFlags:
   Add:
     - -I/opt/homebrew/opt/secp256k1/include
+    - -I/opt/homebrew/opt/openssl@3/include
 ---
 If:
   PathMatch: src/mnemonics\.m
