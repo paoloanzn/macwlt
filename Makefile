@@ -12,6 +12,7 @@ BIN := $(BUILD_DIR)/$(TARGET)
 # rejected by amfid and AMFI SIGKILLs the process at launch (the 137 error).
 ENTITLEMENTS ?=
 CODESIGN_IDENTITY ?= -
+CODESIGN_OPTIONS ?=
 
 CC := clang
 SECP256K1_PREFIX ?= $(shell brew --prefix secp256k1)
@@ -31,7 +32,7 @@ build: $(BIN)
 $(BIN): $(SRC) $(ENTITLEMENTS)
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(LDLIBS)
-	$(CODESIGN) --force --options runtime --sign $(CODESIGN_IDENTITY) $(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS)) $@
+	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS)) $@
 
 install: build
 	install -d $(DESTDIR)$(PREFIX)/bin
