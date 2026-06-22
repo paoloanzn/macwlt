@@ -15,7 +15,7 @@
 static const NSUInteger kSecp256k1SecretSize = 32;
 static const NSUInteger kWalletBootstrapAttempts = 128;
 
-secp256k1_context *gCtx = NULL;
+static secp256k1_context *gCtx = NULL;
 
 typedef NS_ENUM(NSInteger, WalletEnvelopeErrorCode) {
     WalletEnvelopeErrorContextCreateFailed = 1,

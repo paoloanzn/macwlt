@@ -18,10 +18,24 @@
 @property (nonatomic, strong, nullable) NSData *walletEnvelope;
 
 - (void)bootstrapWallet;
+- (void)showOutput:(NSString *)message;
+- (void)showError:(NSError *)error;
 
 @end
 
 @implementation WalletViewController
+
+// Update the output label, always hopping to the main queue since the wallet
+// work runs off-thread.
+- (void)showOutput:(NSString *)message {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.output.stringValue = message;
+    });
+}
+
+- (void)showError:(NSError *)error {
+    [self showOutput:[NSString stringWithFormat:@"error: %@", error]];
+}
 
 - (void)loadView {
     self.input = [NSTextField textFieldWithString:@INPUT_PLACEHOLDER_STRING];
@@ -47,18 +61,14 @@
             NSError *error = nil;
             SecKeyRef key = [SEKeyManager copyKeyWithError:&error];
             if (!key) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    self.output.stringValue = [NSString stringWithFormat:@"error: %@", error];
-                });
+                [self showError:error];
                 return;
             }
 
             SecKeyRef publicKey = SecKeyCopyPublicKey(key);
             if (!publicKey) {
                 CFRelease(key);
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    self.output.stringValue = @"error: could not copy Secure Enclave public key";
-                });
+                [self showOutput:@"error: could not copy Secure Enclave public key"];
                 return;
             }
 
@@ -66,12 +76,12 @@
             CFRelease(publicKey);
             CFRelease(key);
 
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (!envelope) {
-                    self.output.stringValue = [NSString stringWithFormat:@"error: %@", error];
-                    return;
-                }
+            if (!envelope) {
+                [self showError:error];
+                return;
+            }
 
+            dispatch_async(dispatch_get_main_queue(), ^{
                 self.walletEnvelope = envelope;
                 self.signButton.enabled = YES;
                 self.output.stringValue = @"ephemeral wallet ready";
@@ -93,11 +103,8 @@
         ^{
             NSError *error = nil;
             SecKeyRef key = [SEKeyManager copyKeyWithError:&error];
-            if (!key) { 
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    self.output.stringValue = 
-                        [NSString stringWithFormat:@"error: %@", error];
-                });
+            if (!key) {
+                [self showError:error];
                 return;
             }
 
@@ -108,22 +115,17 @@
             NSData *digestData = [NSData dataWithBytes:digest length:sizeof(digest)];
             // Sign the message by
             // -> Passing the envelope containing the wallet private key.
-            // -> Passing the SE key to unwrap the envelop.
+            // -> Passing the SE key to unwrap the envelope.
             NSData *sig = [WalletEnvelopeManager signWithSecp256k1:digestData
-                                                           envelope:envelope
-                                                                key:key
-                                                              error:&error];
+                                                          envelope:envelope
+                                                               key:key
+                                                             error:&error];
             CFRelease(key);
 
-            if(sig) {
-                NSString *h = hex(sig);
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    self.output.stringValue = h;
-                });
+            if (sig) {
+                [self showOutput:hex(sig)];
             } else {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    self.output.stringValue = [NSString stringWithFormat:@"error: %@", error];
-                });
+                [self showError:error];
             }
         }
     );

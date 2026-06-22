@@ -5,11 +5,12 @@
  */
 
 #import "mnemonics.h"
-#include <Foundation/Foundation.h>
 #include <stdint.h>
 #include <zlib.h>
 #import <Security/Security.h>
-#import "hex.h"
+#import <CommonCrypto/CommonDigest.h>
+#import <CommonCrypto/CommonKeyDerivation.h>
+#import <CommonCrypto/CommonCryptoError.h>
 
 enum {
     kBIP39WordCount = 2048,
@@ -71,21 +72,30 @@ static NSArray<NSString *> *loadWordlist(void) {
     return gWordlist;
 }
 
-static NSArray<NSString *> *generateMnemonic(int entropyBits) {
+NSArray<NSString *> *generateMnemonic(int entropyBits) {
+    // BIP-39 entropy is 128–256 bits in 32-bit steps.
+    if (entropyBits < 128 || entropyBits > 256 || entropyBits % 32 != 0) return nil;
+
     NSArray<NSString *> *wordlist = loadWordlist();
     if (!wordlist) return nil;
 
     int entropyBytes = entropyBits / 8;
     uint8_t entropy[32];
-    (void)SecRandomCopyBytes(kSecRandomDefault, entropyBytes, entropy);
+    if (SecRandomCopyBytes(kSecRandomDefault, entropyBytes, entropy) != errSecSuccess) {
+        return nil;
+    }
 
-    uint8_t hash[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(entropy, entropyBytes, hash);
+    uint8_t hash[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(entropy, entropyBytes, hash);
 
-    int csLen = entropyBytes / 32; int totBits = entropyBits + csLen;
-    int wordCount = totBits / 11;
+    // Checksum length in bits is entropyBits / 32; the leading checksum bits are
+    // taken from the SHA-256 of the entropy and appended before chunking.
+    int checksumBits = entropyBits / 32;
+    int totalBits = entropyBits + checksumBits;
+    int wordCount = totalBits / 11;
     NSMutableArray *out = [NSMutableArray arrayWithCapacity:wordCount];
 
-    // Log(n * m)
+    // Each of the wordCount words is an 11-bit index into the wordlist.
     for (int w = 0; w < wordCount; w++) {
         int idx = 0;
         for (int b = 0; b < 11; b++ ) {
@@ -106,7 +116,7 @@ static NSArray<NSString *> *generateMnemonic(int entropyBits) {
     return out;
 }
 
-static NSData *mnemonicToSeed(NSArray<NSString *> *words, NSString *passphrase) {
+NSData *mnemonicToSeed(NSArray<NSString *> *words, NSString *passphrase) {
     NSString *passStr = [[words componentsJoinedByString:@" "]
         decomposedStringWithCompatibilityMapping];
     NSString *saltStr = [[NSString stringWithFormat:@"mnemonic%@", passphrase ?: @""]
@@ -115,10 +125,10 @@ static NSData *mnemonicToSeed(NSArray<NSString *> *words, NSString *passphrase) 
     NSData *salt = [saltStr dataUsingEncoding:NSUTF8StringEncoding];
     uint8_t out[64];
     int rc = CCKeyDerivationPBKDF(kCCPBKDF2,
-        pass.bytes, pass.length,
-            salt.bytes, salt.length,
-            kCCPRFHmacAlgSHA512, 2048,
-            out, sizeof(out));
+                                  pass.bytes, pass.length,
+                                  salt.bytes, salt.length,
+                                  kCCPRFHmacAlgSHA512, 2048,
+                                  out, sizeof(out));
     if (rc != kCCSuccess) return nil;
     return [NSData dataWithBytes:out length:sizeof(out)];
 }

@@ -12,8 +12,9 @@
 #define WINDOW_NAME "Macwlt"
 #define APP_NAME    "macwlt"
 
-// error helper, logs and exit(1).
-void die(NSError *err, NSString *errMsg) {
+// Log an error and terminate. Exits with the NSError's code when one is given,
+// otherwise with 1.
+static void die(NSError *err, NSString *errMsg) {
     NSInteger returnedErrorCode = 1;
     NSString *loggedErrorString = nil;
 
