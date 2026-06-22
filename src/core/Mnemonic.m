@@ -18,7 +18,7 @@ enum {
 
 // Embed BIP-39 compressed list in the final binary.
 static const uint8_t kCompressedWordlist[] = {
-#include "../build/bip39_wordlist.inc"
+#include "../../build/bip39_wordlist.inc"
 };
 
 static NSArray<NSString *> *gWordlist;

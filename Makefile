@@ -4,7 +4,7 @@
 TARGET ?= macwlt
 PREFIX ?= /usr/local
 
-SRC := $(wildcard src/*.m)
+SRC := $(shell find src -type f -name '*.m' | sort)
 BUILD_DIR := build
 BIN := $(BUILD_DIR)/$(TARGET)
 WORDLIST := bip39-2048.txt

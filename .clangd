@@ -4,7 +4,7 @@ CompileFlags:
     - -I/opt/homebrew/opt/openssl@3/include
 ---
 If:
-  PathMatch: src/mnemonics\.m
+  PathMatch: src/core/Mnemonic\.m
 Diagnostics:
   Suppress:
     - pp_file_not_found
