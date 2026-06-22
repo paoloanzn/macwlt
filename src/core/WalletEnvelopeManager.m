@@ -49,7 +49,6 @@ static void setCFError(NSError **outError, CFErrorRef error) {
     else CFRelease(error);
 }
 
-// Singleton context, created only once.
 static secp256k1_context *secp256k1Context(NSError **outError) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -240,7 +239,6 @@ static NSData *decryptEnvelope(NSData *envelope,
     secp256k1_context *ctx = secp256k1Context(outError);
     if (!ctx) return nil;
 
-    // Here SE will require biometrics auth to unwrap the envelope.
     NSData *secret = [self envelopeUnwrap:envelope privateKey:key error:outError];
     if (!secret) return nil;
 

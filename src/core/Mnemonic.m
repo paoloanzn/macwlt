@@ -16,7 +16,6 @@ enum {
     kBIP39WordCount = 2048,
 };
 
-// Embed BIP-39 compressed list in the final binary.
 static const uint8_t kCompressedWordlist[] = {
 #include "../../build/bip39_wordlist.inc"
 };
@@ -75,7 +74,6 @@ static NSArray<NSString *> *loadWordlist(void) {
 @implementation Mnemonic
 
 + (NSArray<NSString *> *)generateWithEntropyBits:(int)entropyBits {
-    // BIP-39 entropy is 128–256 bits in 32-bit steps.
     if (entropyBits < 128 || entropyBits > 256 || entropyBits % 32 != 0) return nil;
 
     NSArray<NSString *> *wordlist = loadWordlist();
@@ -97,7 +95,6 @@ static NSArray<NSString *> *loadWordlist(void) {
     int wordCount = totalBits / 11;
     NSMutableArray *out = [NSMutableArray arrayWithCapacity:wordCount];
 
-    // Each of the wordCount words is an 11-bit index into the wordlist.
     for (int w = 0; w < wordCount; w++) {
         int idx = 0;
         for (int b = 0; b < 11; b++ ) {

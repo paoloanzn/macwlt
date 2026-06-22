@@ -8,7 +8,6 @@
 
 #include <string.h>
 
-// The 32 Bech32 symbols, indexed by 5-bit value.
 static const char *kCharset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 
 // One step of the BIP-173 checksum: a GF(2) polynomial mod the generator. `pre`
@@ -24,9 +23,6 @@ static uint32_t polymodStep(uint32_t pre) {
            (uint32_t)(-((b >> 4) & 1) & 0x2a1462b3u);
 }
 
-// Encode hrp + data (5-bit symbols) + 6-symbol checksum into `out`. `data` holds
-// `dataLen` values each < 32. Returns false if a value is out of range or the
-// result would exceed the 90-char Bech32 limit.
 static bool bech32Encode(char *out, const char *hrp,
                          const uint8_t *data, size_t dataLen) {
     size_t hrpLen = strlen(hrp);
@@ -63,9 +59,6 @@ static bool bech32Encode(char *out, const char *hrp,
     return true;
 }
 
-// Regroup `in` (bytes, inLen) from 8-bit to 5-bit symbols, appending to `out`
-// from offset `*outLen`. Pads the final symbol with zero bits (pad == true for
-// encoding). Returns false only if a symbol overflows, which cannot happen here.
 static bool convertBits(uint8_t *out, size_t *outLen,
                         const uint8_t *in, size_t inLen) {
     uint32_t acc = 0;
@@ -89,10 +82,8 @@ bool segwitAddrEncode(char *out, const char *hrp,
     if (!out || !hrp || !program) return false;
     if (witver < 0 || witver > 16) return false;
     if (programLen < 2 || programLen > 40) return false;
-    // Witness v0 is defined only for 20-byte (P2WPKH) and 32-byte (P2WSH).
     if (witver == 0 && programLen != 20 && programLen != 32) return false;
 
-    // First data symbol is the witness version; the rest is the 5-bit program.
     uint8_t data[1 + 65];
     data[0] = (uint8_t)witver;
     size_t dataLen = 1;

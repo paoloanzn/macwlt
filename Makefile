@@ -9,9 +9,7 @@ BUILD_DIR := build
 BIN := $(BUILD_DIR)/$(TARGET)
 WORDLIST := bip39-2048.txt
 WORDLIST_INC := $(BUILD_DIR)/bip39_wordlist.inc
-# No entitlements: Secure Enclave access here needs none. A restricted
-# entitlement (keychain-access-groups / app-sandbox) on an ad-hoc signature is
-# rejected by amfid and AMFI SIGKILLs the process at launch (the 137 error).
+# Ad-hoc builds cannot use restricted entitlements; AMFI kills faked ones.
 ENTITLEMENTS ?=
 CODESIGN_IDENTITY ?= -
 CODESIGN_OPTIONS ?=

@@ -22,8 +22,6 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSData * _Nullable)walletBootstrap:(SecKeyRef)publicKey
                                 error:(NSError * _Nullable * _Nullable)outError;
 
-// Derive a secp256k1 secret from a BIP-39 seed by walking a BIP-32 path (e.g.
-// "m/84'/0'/0'/0/0"), then wrap it for the Secure Enclave public key.
 + (NSData * _Nullable)walletDeriveAndWrap:(NSData *)seed
                                      path:(NSString *)path
                                 publicKey:(SecKeyRef)publicKey

@@ -25,8 +25,6 @@
 
 @implementation WalletViewController
 
-// Update the output label, always hopping to the main queue since the wallet
-// work runs off-thread.
 - (void)showOutput:(NSString *)message {
     dispatch_async(dispatch_get_main_queue(), ^{
         self.output.stringValue = message;
@@ -113,9 +111,6 @@
             CC_SHA256(msg.bytes, (CC_LONG)msg.length, digest);
 
             NSData *digestData = [NSData dataWithBytes:digest length:sizeof(digest)];
-            // Sign the message by
-            // -> Passing the envelope containing the wallet private key.
-            // -> Passing the SE key to unwrap the envelope.
             NSData *sig = [WalletEnvelopeManager signWithSecp256k1:digestData
                                                           envelope:envelope
                                                                key:key

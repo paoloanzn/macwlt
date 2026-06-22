@@ -9,26 +9,11 @@
 #define WALLET_TAG "app.macwlt.signing.v1"
 #define SE_KEY_ERROR_DOMAIN "app.macwlt.signing.v1"
 
-/***********************************************************************
-* Secure Enclave token object persistence.
-*
-* Permanent Secure Enclave keys are stored in the data protection keychain,
-* which requires a validated keychain access group. Ad-hoc binaries cannot
-* provide that entitlement, and attempts to fake it are rejected before
-* launch or by secd.
-*
-* Store no keychain item here. The key is created as a non-permanent Secure
-* Enclave token key. Its token object ID contains the SE-wrapped private key,
-* public key, and access control data. The blob is usable only on this Mac
-* and only after the access control checks pass.
-*
-* Reopening passes that object ID back to SecKeyCreateRandomKey() with
-* kSecAttrTokenIDSecureEnclave. kSecAttrTokenOID selects reconstruction of
-* the token object instead of generation of a new key; kSecAttrIsPermanent
-* remains false so nothing is filed in the keychain.
-*
-* kSecAttrTokenOID is Security SPI. Its CFString key is "toid".
-**********************************************************************/
+/*
+ * Ad-hoc binaries cannot create permanent Secure Enclave keychain items.
+ * Store the non-permanent token object's Secure Enclave blob instead; the
+ * kSecAttrTokenOID SPI key is "toid".
+ */
 static CFStringRef kTokenOID(void) { return CFSTR("toid"); }
 
 static const CFOptionFlags kKeyAccessFlags = kSecAccessControlPrivateKeyUsage
@@ -58,8 +43,6 @@ static NSData *kWalletTag(void) {
     return [@WALLET_TAG dataUsingEncoding:NSUTF8StringEncoding];
 }
 
-// Where we keep the SE-wrapped key blob. It is device-bound and ACL-gated, so
-// the file alone cannot sign anything off this Mac or without the key's ACL.
 static NSString *blobPath(void) {
     NSString *dir = [NSHomeDirectory() stringByAppendingPathComponent:
                      @"Library/Application Support/macwlt"];
@@ -77,14 +60,11 @@ static NSData *loadStoredBlob(void) {
 static BOOL storeBlob(NSData *blob) {
     NSString *path = blobPath();
     if (![blob writeToFile:path options:NSDataWritingAtomic error:NULL]) return NO;
-    // The blob is already SE-wrapped and device-bound; still, keep it owner-only.
     [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @0600}
                                      ofItemAtPath:path error:NULL];
     return YES;
 }
 
-// Create a fresh Secure Enclave key (never persisted in the keychain) and
-// return its SE-wrapped token blob via *outBlob.
 static SecKeyRef makeSEKey(NSData **outBlob, NSError **outError) {
     CFErrorRef accessError = NULL;
     SecAccessControlRef access = SecAccessControlCreateWithFlags(
@@ -103,7 +83,7 @@ static SecKeyRef makeSEKey(NSData **outBlob, NSError **outError) {
         (__bridge id)kSecAttrKeySizeInBits: @256,
         (__bridge id)kSecAttrTokenID: (__bridge id)kSecAttrTokenIDSecureEnclave,
         (__bridge id)kSecPrivateKeyAttrs: @{
-            (__bridge id)kSecAttrIsPermanent: @NO, // never touch the keychain
+            (__bridge id)kSecAttrIsPermanent: @NO,
             (__bridge id)kSecAttrApplicationTag: kWalletTag(),
             (__bridge id)kSecAttrAccessControl: (__bridge id)access,
         },
@@ -129,14 +109,12 @@ static SecKeyRef makeSEKey(NSData **outBlob, NSError **outError) {
     return key;
 }
 
-// Rebuild a SecKeyRef from a stored SE-wrapped blob. No key generation, no
-// keychain: the SE just unwraps the blob into a usable token object.
 static SecKeyRef reconstructSEKey(NSData *blob, NSError **outError) {
     NSDictionary *ref = @{
         (__bridge id)kSecAttrTokenID: (__bridge id)kSecAttrTokenIDSecureEnclave,
         (__bridge id)kTokenOID(): blob,
         (__bridge id)kSecPrivateKeyAttrs: @{
-            (__bridge id)kSecAttrIsPermanent: @NO, // reconstruct only, do not file
+            (__bridge id)kSecAttrIsPermanent: @NO,
         },
     };
     CFErrorRef error = NULL;
