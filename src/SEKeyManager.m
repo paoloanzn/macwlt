@@ -7,6 +7,7 @@
 #import "SEKeyManager.h"
 
 #define WALLET_TAG "app.macwlt.signing.v1"
+#define SE_KEY_ERROR_DOMAIN "app.macwlt.signing.v1"
 
 /***********************************************************************
 * Secure Enclave token object persistence.
@@ -31,7 +32,27 @@
 static CFStringRef kTokenOID(void) { return CFSTR("toid"); }
 
 static const CFOptionFlags kKeyAccessFlags = kSecAccessControlPrivateKeyUsage
-                                          | kSecAccessControlBiometryAny;
+                                           | kSecAccessControlBiometryAny;
+
+typedef NS_ENUM(NSInteger, SEKeyErrorCode) {
+    SEKeyErrorMissingTokenOID = 1,
+};
+
+static NSError *seKeyError(SEKeyErrorCode code, NSString *message) {
+    return [NSError errorWithDomain:@SE_KEY_ERROR_DOMAIN
+                               code:code
+                           userInfo:@{NSLocalizedDescriptionKey: message}];
+}
+
+static void setError(NSError **outError, SEKeyErrorCode code, NSString *message) {
+    if (outError) *outError = seKeyError(code, message);
+}
+
+static void setCFError(NSError **outError, CFErrorRef error) {
+    if (!error) return;
+    if (outError) *outError = CFBridgingRelease(error);
+    else CFRelease(error);
+}
 
 static NSData *kWalletTag(void) {
     return [@WALLET_TAG dataUsingEncoding:NSUTF8StringEncoding];
@@ -72,7 +93,10 @@ static SecKeyRef makeSEKey(NSData **outBlob, NSError **outError) {
         kKeyAccessFlags,
         &accessError
     );
-    if (!access) { if (outError) *outError = CFBridgingRelease(accessError); return NULL; }
+    if (!access) {
+        setCFError(outError, accessError);
+        return NULL;
+    }
 
     NSDictionary *attrs = @{
         (__bridge id)kSecAttrKeyType: (__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
@@ -88,13 +112,16 @@ static SecKeyRef makeSEKey(NSData **outBlob, NSError **outError) {
     CFErrorRef keyError = NULL;
     SecKeyRef key = SecKeyCreateRandomKey((__bridge CFDictionaryRef)attrs, &keyError);
     CFRelease(access);
-    if (!key) { if (outError) *outError = CFBridgingRelease(keyError); return NULL; }
+    if (!key) {
+        setCFError(outError, keyError);
+        return NULL;
+    }
 
     NSDictionary *keyAttrs = CFBridgingRelease(SecKeyCopyAttributes(key));
     NSData *blob = keyAttrs[(__bridge id)kTokenOID()];
     if (!blob) {
-        if (outError) *outError = [NSError errorWithDomain:@WALLET_TAG code:1
-            userInfo:@{NSLocalizedDescriptionKey: @"Secure Enclave key has no token OID"}];
+        setError(outError, SEKeyErrorMissingTokenOID,
+                 @"Secure Enclave key has no token OID");
         CFRelease(key);
         return NULL;
     }
@@ -114,7 +141,7 @@ static SecKeyRef reconstructSEKey(NSData *blob, NSError **outError) {
     };
     CFErrorRef error = NULL;
     SecKeyRef key = SecKeyCreateRandomKey((__bridge CFDictionaryRef)ref, &error);
-    if (!key && outError) *outError = CFBridgingRelease(error);
+    if (!key) setCFError(outError, error);
     return key;
 }
 
