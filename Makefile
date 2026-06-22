@@ -14,8 +14,14 @@ ENTITLEMENTS ?=
 CODESIGN_IDENTITY ?= -
 
 CC := clang
+SECP256K1_PREFIX ?= $(shell brew --prefix secp256k1)
+CPPFLAGS ?=
 CFLAGS ?= -fobjc-arc -Wall -Wextra
+LDFLAGS ?=
+CPPFLAGS += -I$(SECP256K1_PREFIX)/include
+LDFLAGS += -L$(SECP256K1_PREFIX)/lib
 LDLIBS ?= -framework Foundation -framework Security -framework AppKit -framework Cocoa
+LDLIBS += -lsecp256k1
 CODESIGN ?= codesign
 
 .PHONY: build install clean
@@ -24,7 +30,7 @@ build: $(BIN)
 
 $(BIN): $(SRC) $(ENTITLEMENTS)
 	@mkdir -p $(BUILD_DIR)
-	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDLIBS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(LDLIBS)
 	$(CODESIGN) --force --options runtime --sign $(CODESIGN_IDENTITY) $(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS)) $@
 
 install: build
