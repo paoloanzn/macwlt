@@ -5,6 +5,7 @@
  */
 
 #import "WalletEnvelopeManager.h"
+#import "BIP32.h"
 
 #import <dispatch/dispatch.h>
 #import <secp256k1.h>
@@ -25,6 +26,7 @@ typedef NS_ENUM(NSInteger, WalletEnvelopeErrorCode) {
     WalletEnvelopeErrorRandomFailed,
     WalletEnvelopeErrorInvalidDigestLength,
     WalletEnvelopeErrorSigningFailed,
+    WalletEnvelopeErrorDerivationFailed,
 };
 
 static SecKeyAlgorithm envelopeAlgorithm(void) {
@@ -180,6 +182,44 @@ static NSData *decryptEnvelope(NSData *envelope,
 
     NSData *envelope = nil;
     @try {
+        envelope = [self envelopeWrap:secret publicKey:publicKey error:outError];
+    } @finally {
+        secureClearData(secret);
+    }
+    return envelope;
+}
+
++ (NSData *)walletDeriveAndWrap:(NSData *)seed
+                          path:(NSString *)path
+                     publicKey:(SecKeyRef)publicKey
+                         error:(NSError **)outError {
+    secp256k1_context *ctx = secp256k1Context(outError);
+    if (!ctx) return nil;
+
+    const char *pathStr = path.UTF8String;
+    if (!pathStr) {
+        setError(outError, WalletEnvelopeErrorDerivationFailed,
+                 @"BIP-32 derivation path is invalid");
+        return nil;
+    }
+
+    // Back the node with NSMutableData so it can be wiped with secureClearData.
+    NSMutableData *nodeData = [NSMutableData dataWithLength:sizeof(ExtKey)];
+    ExtKey *node = nodeData.mutableBytes;
+    if (!bip32Derive(ctx, seed.bytes, seed.length, pathStr, node)) {
+        secureClearData(nodeData);
+        setError(outError, WalletEnvelopeErrorDerivationFailed,
+                 @"Could not derive BIP-32 child key for path");
+        return nil;
+    }
+
+    NSMutableData *secret = [NSMutableData dataWithBytes:node->priv
+                                                 length:kSecp256k1SecretSize];
+    secureClearData(nodeData);
+
+    NSData *envelope = nil;
+    @try {
+        if (!validateSecp256k1Secret(secret, outError)) return nil;
         envelope = [self envelopeWrap:secret publicKey:publicKey error:outError];
     } @finally {
         secureClearData(secret);
