@@ -18,13 +18,14 @@ CODESIGN_OPTIONS ?=
 
 CC := clang
 SECP256K1_PREFIX ?= $(shell brew --prefix secp256k1)
+OPENSSL_PREFIX ?= $(shell brew --prefix openssl@3)
 CPPFLAGS ?=
 CFLAGS ?= -fobjc-arc -Wall -Wextra
 LDFLAGS ?=
-CPPFLAGS += -I$(SECP256K1_PREFIX)/include
-LDFLAGS += -L$(SECP256K1_PREFIX)/lib
+CPPFLAGS += -I$(SECP256K1_PREFIX)/include -I$(OPENSSL_PREFIX)/include
+LDFLAGS += -L$(SECP256K1_PREFIX)/lib -L$(OPENSSL_PREFIX)/lib
 LDLIBS ?= -framework Foundation -framework Security -framework AppKit -framework Cocoa
-LDLIBS += -lsecp256k1 -lz
+LDLIBS += -lsecp256k1 -lcrypto -lz
 CODESIGN ?= codesign
 
 .PHONY: build install clean
