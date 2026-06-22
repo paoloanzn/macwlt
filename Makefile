@@ -7,6 +7,8 @@ PREFIX ?= /usr/local
 SRC := $(wildcard src/*.m)
 BUILD_DIR := build
 BIN := $(BUILD_DIR)/$(TARGET)
+WORDLIST := bip39-2048.txt
+WORDLIST_INC := $(BUILD_DIR)/bip39_wordlist.inc
 # No entitlements: Secure Enclave access here needs none. A restricted
 # entitlement (keychain-access-groups / app-sandbox) on an ad-hoc signature is
 # rejected by amfid and AMFI SIGKILLs the process at launch (the 137 error).
@@ -22,14 +24,18 @@ LDFLAGS ?=
 CPPFLAGS += -I$(SECP256K1_PREFIX)/include
 LDFLAGS += -L$(SECP256K1_PREFIX)/lib
 LDLIBS ?= -framework Foundation -framework Security -framework AppKit -framework Cocoa
-LDLIBS += -lsecp256k1
+LDLIBS += -lsecp256k1 -lz
 CODESIGN ?= codesign
 
 .PHONY: build install clean
 
 build: $(BIN)
 
-$(BIN): $(SRC) $(ENTITLEMENTS)
+$(WORDLIST_INC): $(WORDLIST)
+	@mkdir -p $(BUILD_DIR)
+	gzip -cn9 $< | xxd -i > $@
+
+$(BIN): $(SRC) $(WORDLIST_INC) $(ENTITLEMENTS)
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(LDLIBS)
 	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS)) $@
