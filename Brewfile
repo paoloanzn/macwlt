@@ -1,3 +1,6 @@
+brew "autoconf"
+brew "automake"
+brew "gnu-sed"
+brew "libtool"
 brew "pkg-config"
-brew "secp256k1"
 brew "openssl@3"

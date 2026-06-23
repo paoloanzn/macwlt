@@ -9,5 +9,6 @@
 NS_ASSUME_NONNULL_BEGIN
 
 NSString *_Nullable p2wpkhAddress(NSData *compressedPubKey, BOOL mainnet);
+NSString *_Nullable ethereumAddress(NSData *publicKey);
 
 NS_ASSUME_NONNULL_END
