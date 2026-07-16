@@ -1,0 +1,27 @@
+{
+  "name": "@macwlt/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "macwlt": "./dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "bun run src/main.ts",
+    "start": "bun run dist/main.js",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.19",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3"
+  }
+}

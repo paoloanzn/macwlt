@@ -6,6 +6,7 @@ PREFIX ?= /usr/local
 
 ALL_SRC := $(shell find src -type f -name '*.m' | sort)
 APP_SRC := $(filter-out src/xpc/%,$(ALL_SRC))
+CORE_SRC := $(shell find src/core -type f -name '*.m' | sort)
 SIGNING_SERVICE_SRC := $(filter-out src/core/SigningServiceClient.m,$(filter-out src/ui/%,$(filter-out src/xpc/%,$(ALL_SRC)))) \
 	src/xpc/SigningServiceMain.m
 HEADERS := $(shell find src -type f -name '*.h' | sort)
@@ -28,6 +29,7 @@ TEST_SRC := tests/core_tests.m \
 	src/core/WalletShareEnvelope.m
 BUILD_DIR := build
 BIN := $(BUILD_DIR)/$(TARGET)
+LIB := $(BUILD_DIR)/libmacwlt.dylib
 TEST_BIN := $(BUILD_DIR)/core_tests
 APP_BUNDLE_ID ?= com.macwlt.App
 APP_BUNDLE := $(BUILD_DIR)/macwlt.app
@@ -72,7 +74,7 @@ CODESIGN ?= codesign
 
 .PHONY: build test install clean submodules signing-service app-bundle
 
-build: $(BIN) signing-service app-bundle
+build: $(BIN) $(LIB) signing-service app-bundle
 
 signing-service: $(SIGNING_SERVICE_BIN)
 
@@ -110,6 +112,11 @@ $(BIN): $(APP_SRC) $(HEADERS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) $(
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(APP_SRC) $(LDLIBS)
 	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS)) $@
+
+$(LIB): $(CORE_SRC) $(HEADERS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB)
+	@mkdir -p $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -dynamiclib -install_name @rpath/libmacwlt.dylib -o $@ $(CORE_SRC) $(LDLIBS)
+	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $@
 
 $(SIGNING_SERVICE_BIN): $(SIGNING_SERVICE_SRC) $(HEADERS) $(SIGNING_SERVICE_INFO_PLIST) $(SIGNING_SERVICE_ENTITLEMENTS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB)
 	@mkdir -p $(SIGNING_SERVICE_BUNDLE)/Contents/MacOS
