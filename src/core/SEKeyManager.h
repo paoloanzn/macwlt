@@ -11,6 +11,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface SEKeyManager : NSObject
 
++ (BOOL)secureEnclaveAvailable;
 + (SecKeyRef _Nullable)copyKeyWithError:(NSError * _Nullable * _Nullable)outError CF_RETURNS_RETAINED;
 
 - (instancetype)init NS_UNAVAILABLE;

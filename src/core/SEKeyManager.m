@@ -140,7 +140,43 @@ static SecKeyRef reconstructSEKey(NSData *blob, NSError **outError) {
     return key;
 }
 
+static BOOL seProbeFailureMeansUnavailable(CFErrorRef error) {
+    return error && CFErrorGetCode(error) == errSecUnimplemented;
+}
+
+static BOOL probeSecureEnclaveAvailability(void) {
+    /*
+     * Keep this probe close to makeSEKey's Secure Enclave generation path, but
+     * do not share the biometric access-control attributes: startup probing must
+     * stay non-interactive even though the real wallet key requires biometrics.
+     */
+    NSDictionary *attrs = @{
+        (__bridge id)kSecAttrKeyType: (__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
+        (__bridge id)kSecAttrKeySizeInBits: @256,
+        (__bridge id)kSecAttrTokenID: (__bridge id)kSecAttrTokenIDSecureEnclave,
+        (__bridge id)kSecPrivateKeyAttrs: @{
+            (__bridge id)kSecAttrIsPermanent: @NO,
+        },
+    };
+
+    CFErrorRef error = NULL;
+    SecKeyRef key = SecKeyCreateRandomKey((__bridge CFDictionaryRef)attrs, &error);
+    if (key) {
+        if (error) CFRelease(error);
+        CFRelease(key);
+        return YES;
+    }
+
+    BOOL unavailable = seProbeFailureMeansUnavailable(error);
+    if (error) CFRelease(error);
+    return !unavailable;
+}
+
 @implementation SEKeyManager
+
++ (BOOL)secureEnclaveAvailable {
+    return probeSecureEnclaveAvailability();
+}
 
 + (SecKeyRef)copyKeyWithError:(NSError **)outError {
     NSError *storageError = nil;

@@ -7,6 +7,7 @@
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
 #import <stdlib.h>
+#import "../core/SEKeyManager.h"
 #import "WalletViewController.h"
 
 #define WINDOW_NAME "Macwlt"
@@ -25,6 +26,10 @@ static void die(NSError *err, NSString *errMsg) {
 
 int main(void) {
     @autoreleasepool {
+        if (![SEKeyManager secureEnclaveAvailable]) {
+            die(NULL, @"Secure Enclave is not available");
+        }
+
         NSApplication *app = [NSApplication sharedApplication];
         BOOL success = [app setActivationPolicy:NSApplicationActivationPolicyRegular];
         if (!success) die(NULL, @"Failed to set ActivationPolicy");
