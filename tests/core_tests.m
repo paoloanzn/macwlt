@@ -6,10 +6,10 @@
 
 #import <Foundation/Foundation.h>
 
-#import "src/core/Address.h"
-#import "src/core/Mnemonic.h"
-#import "src/core/PSBT.h"
-#import "src/core/hex.h"
+#import "../src/core/Address.h"
+#import "../src/core/Mnemonic.h"
+#import "../src/core/PSBT.h"
+#import "../src/core/hex.h"
 
 static void fail(NSString *message) {
     NSLog(@"%@", message);
