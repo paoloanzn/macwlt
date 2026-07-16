@@ -5,14 +5,6 @@
 
 **Read `CLAUDE.md` first** - it contains mandatory coding practices.
 
-## Architecture
-
-Pure Objective-C.
-
-## Finding Your Way
-
-- Use Objective-C to write new features.
-
 ## Commits
 - Use this commit message format when the user explicitly asks for a commit:
   `(<commit type>) (<ai model>, <human reviewed T|F>, <tested T|F>) <commit text>`.
