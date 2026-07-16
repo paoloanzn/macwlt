@@ -8,8 +8,10 @@
 
 #import "../src/core/Address.h"
 #import "../src/core/PSBT.h"
+#import "../src/core/SigningServiceProtocol.h"
 #import "../src/core/hex.h"
 
+#include "../src/core/macwlt.h"
 #include <wally_bip39.h>
 #include <wally_core.h>
 
@@ -93,6 +95,16 @@ static void testPSBTInvalidData(void) {
     expect(error != nil, @"invalid PSBT data did not set NSError");
 }
 
+static void testSigningBoundaryHeaders(void) {
+    macwlt_wallet_t *wallet = NULL;
+    macwlt_err_t err = MACWLT_OK;
+    expect(wallet == NULL, @"opaque wallet handle should compile as an incomplete type");
+    expect(err == MACWLT_OK, @"C ABI error enum should expose MACWLT_OK");
+    expect(MACWLT_FAILURE < MACWLT_SUCCESS, @"C ABI should use int status returns");
+    expect(@protocol(SigningServiceProtocol) != nil,
+           @"SigningServiceProtocol should be visible to Objective-C callers");
+}
+
 int main(void) {
     @autoreleasepool {
         expect(wally_init(0) == WALLY_OK, @"wally_init failed");
@@ -101,6 +113,7 @@ int main(void) {
         testP2WPKHAddress();
         testEthereumAddress();
         testPSBTInvalidData();
+        testSigningBoundaryHeaders();
         NSLog(@"core tests passed");
     }
     return 0;
