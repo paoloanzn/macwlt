@@ -7,11 +7,23 @@
 #import <Foundation/Foundation.h>
 
 #import "../src/core/Address.h"
+#import "../src/core/HardenedBuffer.h"
+#import "../src/core/HardenedShareWindow.h"
 #import "../src/core/PSBT.h"
+#import "../src/core/SigningService.h"
+#import "../src/core/SigningServiceClient.h"
+#import "../src/core/SigningServiceListenerDelegate.h"
 #import "../src/core/SigningServiceProtocol.h"
+#import "../src/core/SigningShareSet.h"
+#import "../src/core/WalletShareEnvelope.h"
 #import "../src/core/hex.h"
 
 #include "../src/core/macwlt.h"
+#include <secp256k1.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <string.h>
+#include <unistd.h>
 #include <wally_bip39.h>
 #include <wally_core.h>
 
@@ -37,6 +49,99 @@ static NSData *dataFromHex(NSString *string) {
     }
     return data;
 }
+
+static NSData *scalarData(uint8_t value) {
+    NSMutableData *data = [NSMutableData dataWithLength:32];
+    uint8_t *bytes = data.mutableBytes;
+    bytes[31] = value;
+    return data;
+}
+
+static NSData *compressedPublicKeyForSecret(NSData *secret) {
+    secp256k1_context *ctx = wally_get_secp_context();
+    expect(ctx != NULL, @"secp256k1 context unavailable");
+
+    secp256k1_pubkey pubkey;
+    expect(secp256k1_ec_pubkey_create(ctx, &pubkey, secret.bytes),
+           @"secp256k1_ec_pubkey_create failed");
+
+    uint8_t compressed[33];
+    size_t compressedLength = sizeof(compressed);
+    expect(secp256k1_ec_pubkey_serialize(ctx,
+                                         compressed,
+                                         &compressedLength,
+                                         &pubkey,
+                                         SECP256K1_EC_COMPRESSED),
+           @"secp256k1_ec_pubkey_serialize failed");
+    expect(compressedLength == sizeof(compressed),
+           @"unexpected compressed public key length");
+    return [NSData dataWithBytes:compressed length:sizeof(compressed)];
+}
+
+static NSURL *temporaryTestFileURL(NSString *name) {
+    NSString *directory = [NSTemporaryDirectory()
+        stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
+    return [[NSURL fileURLWithPath:directory isDirectory:YES]
+        URLByAppendingPathComponent:name
+                        isDirectory:NO];
+}
+
+static sigjmp_buf maskedReadJump;
+static volatile sig_atomic_t expectingMaskedReadSignal = 0;
+
+static void maskedReadSignalHandler(int signalNumber) {
+    if (expectingMaskedReadSignal) siglongjmp(maskedReadJump, signalNumber);
+    _exit(128 + signalNumber);
+}
+
+static BOOL readTriggersProtectionFault(volatile uint8_t *address) {
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = maskedReadSignalHandler;
+    sigemptyset(&action.sa_mask);
+
+    struct sigaction previousSEGV;
+    struct sigaction previousBUS;
+    sigaction(SIGSEGV, &action, &previousSEGV);
+    sigaction(SIGBUS, &action, &previousBUS);
+
+    int signalNumber = sigsetjmp(maskedReadJump, 1);
+    if (signalNumber == 0) {
+        expectingMaskedReadSignal = 1;
+        volatile uint8_t value = *address;
+        (void)value;
+        expectingMaskedReadSignal = 0;
+        sigaction(SIGSEGV, &previousSEGV, NULL);
+        sigaction(SIGBUS, &previousBUS, NULL);
+        return NO;
+    }
+
+    expectingMaskedReadSignal = 0;
+    sigaction(SIGSEGV, &previousSEGV, NULL);
+    sigaction(SIGBUS, &previousBUS, NULL);
+    return signalNumber == SIGSEGV || signalNumber == SIGBUS;
+}
+
+@interface MockXPCConnection : NSObject
+@property (nonatomic, strong) NSXPCInterface *exportedInterface;
+@property (nonatomic, strong) id exportedObject;
+@property (nonatomic, readonly) BOOL resumed;
+- (void)resume;
+@end
+
+@implementation MockXPCConnection {
+    BOOL _resumed;
+}
+
+- (void)resume {
+    _resumed = YES;
+}
+
+- (BOOL)resumed {
+    return _resumed;
+}
+
+@end
 
 static void testHex(void) {
     const uint8_t bytes[] = {0x00, 0xab, 0xff};
@@ -95,6 +200,320 @@ static void testPSBTInvalidData(void) {
     expect(error != nil, @"invalid PSBT data did not set NSError");
 }
 
+static void testHardenedBufferMasksMemory(void) {
+    NSError *error = nil;
+    HardenedBuffer *buffer = [HardenedBuffer bufferWithLength:32 error:&error];
+    expect(buffer != nil,
+           [NSString stringWithFormat:@"hardened buffer allocation failed: %@", error]);
+    expect(buffer.length == 32, @"hardened buffer reported wrong usable length");
+    expect(buffer.state == HardenedBufferStateMasked,
+           @"hardened buffer should start masked");
+
+    expect([buffer unmaskWithError:&error],
+           [NSString stringWithFormat:@"hardened buffer unmask failed: %@", error]);
+    expect(buffer.state == HardenedBufferStateUnmasked,
+           @"hardened buffer should report unmasked state");
+
+    uint8_t *bytes = [buffer mutableBytes];
+    bytes[0] = 0xa5;
+    expect(bytes[0] == 0xa5, @"hardened buffer write/read while unmasked failed");
+
+    expect([buffer maskWithError:&error],
+           [NSString stringWithFormat:@"hardened buffer mask failed: %@", error]);
+    expect(buffer.state == HardenedBufferStateMasked,
+           @"hardened buffer should report masked state");
+    expect(readTriggersProtectionFault(bytes),
+           @"masked hardened buffer memory remained readable");
+}
+
+static void testHardenedBufferWipeAndMask(void) {
+    NSError *error = nil;
+    HardenedBuffer *buffer = [HardenedBuffer bufferWithLength:32 error:&error];
+    expect(buffer != nil,
+           [NSString stringWithFormat:@"hardened buffer allocation failed: %@", error]);
+    expect([buffer unmaskWithError:&error],
+           [NSString stringWithFormat:@"hardened buffer unmask failed: %@", error]);
+
+    uint8_t *bytes = [buffer mutableBytes];
+    memset(bytes, 0x7b, 32);
+    expect([buffer wipeAndMaskWithError:&error],
+           [NSString stringWithFormat:@"hardened buffer wipe failed: %@", error]);
+    expect(buffer.state == HardenedBufferStateMasked,
+           @"hardened buffer should be masked after wipe");
+
+    expect([buffer unmaskWithError:&error],
+           [NSString stringWithFormat:@"hardened buffer unmask after wipe failed: %@", error]);
+    bytes = [buffer mutableBytes];
+    for (NSUInteger i = 0; i < 32; i++) {
+        expect(bytes[i] == 0, @"hardened buffer retained data after wipe");
+    }
+    expect([buffer maskWithError:&error],
+           [NSString stringWithFormat:@"hardened buffer remask failed: %@", error]);
+}
+
+static BOOL loadSharePattern(HardenedBuffer *buffer, uint8_t pattern, NSError **outError) {
+    if (![buffer unmaskWithError:outError]) return NO;
+    memset([buffer mutableBytes], pattern, buffer.length);
+    return YES;
+}
+
+static void testHardenedShareWindowSequencing(void) {
+    NSError *error = nil;
+    HardenedShareWindow *window = [HardenedShareWindow windowWithShareLength:32
+                                                                       error:&error];
+    expect(window != nil,
+           [NSString stringWithFormat:@"share window allocation failed: %@", error]);
+
+    NSMutableArray<NSString *> *events = [NSMutableArray array];
+    BOOL ok = [window performWithShareALoader:^BOOL(HardenedBuffer *targetBuffer,
+                                                    NSError **outError) {
+        expect(window.shareAState == HardenedBufferStateMasked,
+               @"share A should be masked before loading A");
+        expect(window.shareBState == HardenedBufferStateMasked,
+               @"share B should be masked before loading A");
+        [events addObject:@"loadA"];
+        return loadSharePattern(targetBuffer, 0xa1, outError);
+    } shareAUse:^BOOL(const uint8_t *shareBytes,
+                      NSUInteger shareLength,
+                      NSError **outError) {
+        (void)outError;
+        expect(shareLength == 32, @"share A use saw wrong length");
+        expect(shareBytes[0] == 0xa1, @"share A use saw wrong byte");
+        expect(window.shareAState == HardenedBufferStateUnmasked,
+               @"share A should be unmasked during A use");
+        expect(window.shareBState == HardenedBufferStateMasked,
+               @"share B should be masked during A use");
+        [events addObject:@"useA"];
+        return YES;
+    } shareBLoader:^BOOL(HardenedBuffer *targetBuffer,
+                         NSError **outError) {
+        expect(window.shareAState == HardenedBufferStateMasked,
+               @"share A should be masked before loading B");
+        expect(window.shareBState == HardenedBufferStateMasked,
+               @"share B should be masked before loading B");
+        [events addObject:@"loadB"];
+        return loadSharePattern(targetBuffer, 0xb2, outError);
+    } shareBUse:^BOOL(const uint8_t *shareBytes,
+                      NSUInteger shareLength,
+                      NSError **outError) {
+        (void)outError;
+        expect(shareLength == 32, @"share B use saw wrong length");
+        expect(shareBytes[0] == 0xb2, @"share B use saw wrong byte");
+        expect(window.shareAState == HardenedBufferStateMasked,
+               @"share A should be masked during B use");
+        expect(window.shareBState == HardenedBufferStateUnmasked,
+               @"share B should be unmasked during B use");
+        [events addObject:@"useB"];
+        return YES;
+    } error:&error];
+
+    expect(ok, [NSString stringWithFormat:@"share window sequencing failed: %@", error]);
+    expect(window.shareAState == HardenedBufferStateMasked,
+           @"share A should be masked after sequencing");
+    expect(window.shareBState == HardenedBufferStateMasked,
+           @"share B should be masked after sequencing");
+    expect([events isEqualToArray:@[@"loadA", @"useA", @"loadB", @"useB"]],
+           @"share window events ran in the wrong order");
+}
+
+static void testHardenedShareWindowMasksAfterFailure(void) {
+    NSError *error = nil;
+    HardenedShareWindow *window = [HardenedShareWindow windowWithShareLength:32
+                                                                       error:&error];
+    expect(window != nil,
+           [NSString stringWithFormat:@"share window allocation failed: %@", error]);
+
+    BOOL ok = [window performWithShareALoader:^BOOL(HardenedBuffer *targetBuffer,
+                                                    NSError **outError) {
+        return loadSharePattern(targetBuffer, 0xa1, outError);
+    } shareAUse:^BOOL(const uint8_t *shareBytes,
+                      NSUInteger shareLength,
+                      NSError **outError) {
+        (void)shareBytes;
+        (void)shareLength;
+        if (outError) {
+            *outError = [NSError errorWithDomain:@"macwlt.tests"
+                                            code:1
+                                        userInfo:@{NSLocalizedDescriptionKey: @"expected failure"}];
+        }
+        return NO;
+    } shareBLoader:^BOOL(HardenedBuffer *targetBuffer,
+                         NSError **outError) {
+        return loadSharePattern(targetBuffer, 0xb2, outError);
+    } shareBUse:^BOOL(const uint8_t *shareBytes,
+                      NSUInteger shareLength,
+                      NSError **outError) {
+        (void)shareBytes;
+        (void)shareLength;
+        (void)outError;
+        fail(@"share B should not run after share A failure");
+        return NO;
+    } error:&error];
+
+    expect(!ok, @"share window unexpectedly succeeded after use failure");
+    expect([error.domain isEqualToString:@"macwlt.tests"],
+           @"share window did not preserve operation failure error");
+    expect(window.shareAState == HardenedBufferStateMasked,
+           @"share A should be masked after failure");
+    expect(window.shareBState == HardenedBufferStateMasked,
+           @"share B should remain masked after failure");
+}
+
+static void testHardenedShareWindowRejectsClosedLoader(void) {
+    NSError *error = nil;
+    HardenedShareWindow *window = [HardenedShareWindow windowWithShareLength:32
+                                                                       error:&error];
+    expect(window != nil,
+           [NSString stringWithFormat:@"share window allocation failed: %@", error]);
+
+    BOOL ok = [window performWithShareALoader:^BOOL(HardenedBuffer *targetBuffer,
+                                                    NSError **outError) {
+        (void)targetBuffer;
+        (void)outError;
+        return YES;
+    } shareAUse:^BOOL(const uint8_t *shareBytes,
+                      NSUInteger shareLength,
+                      NSError **outError) {
+        (void)shareBytes;
+        (void)shareLength;
+        (void)outError;
+        fail(@"share A use should not run when loader leaves buffer masked");
+        return NO;
+    } shareBLoader:^BOOL(HardenedBuffer *targetBuffer,
+                         NSError **outError) {
+        return loadSharePattern(targetBuffer, 0xb2, outError);
+    } shareBUse:^BOOL(const uint8_t *shareBytes,
+                      NSUInteger shareLength,
+                      NSError **outError) {
+        (void)shareBytes;
+        (void)shareLength;
+        (void)outError;
+        return YES;
+    } error:&error];
+
+    expect(!ok, @"share window unexpectedly accepted a closed loader");
+    expect([error.domain isEqualToString:HardenedShareWindowErrorDomain],
+           @"closed loader returned wrong error domain");
+    expect(error.code == HardenedShareWindowErrorLoaderDidNotUnmask,
+           @"closed loader returned wrong error code");
+    expect(window.shareAState == HardenedBufferStateMasked,
+           @"share A should stay masked after closed loader");
+    expect(window.shareBState == HardenedBufferStateMasked,
+           @"share B should stay masked after closed loader");
+}
+
+static void testSigningShareSetKnownPublicKey(void) {
+    NSData *one = scalarData(1);
+    NSData *two = scalarData(2);
+
+    NSError *error = nil;
+    NSData *joint = [SigningShareSet jointCompressedPublicKeyForShareA:one
+                                                                shareB:two
+                                                                 error:&error];
+    expect(joint != nil,
+           [NSString stringWithFormat:@"joint public key failed: %@", error]);
+    expect([joint isEqualToData:compressedPublicKeyForSecret(two)],
+           @"joint public key with share A = 1 should match share B public key");
+}
+
+static void testSigningShareSetRejectsInvalidShare(void) {
+    NSData *zero = scalarData(0);
+    NSData *one = scalarData(1);
+
+    NSError *error = nil;
+    NSData *joint = [SigningShareSet jointCompressedPublicKeyForShareA:zero
+                                                                shareB:one
+                                                                 error:&error];
+    expect(joint == nil, @"zero signing share unexpectedly accepted");
+    expect([error.domain isEqualToString:SigningShareSetErrorDomain],
+           @"invalid signing share returned wrong error domain");
+    expect(error.code == SigningShareSetErrorInvalidShare,
+           @"invalid signing share returned wrong error code");
+}
+
+static void testSigningShareSetGeneratedCommutative(void) {
+    NSError *error = nil;
+    SigningShareSet *shareSet = [SigningShareSet generateWithError:&error];
+    expect(shareSet != nil,
+           [NSString stringWithFormat:@"share generation failed: %@", error]);
+    expect(shareSet.shareA.length == 32, @"share A length is not 32 bytes");
+    expect(shareSet.shareB.length == 32, @"share B length is not 32 bytes");
+    expect(shareSet.jointCompressedPublicKey.length == 33,
+           @"joint public key length is not 33 bytes");
+
+    NSData *swapped = [SigningShareSet jointCompressedPublicKeyForShareA:shareSet.shareB
+                                                                  shareB:shareSet.shareA
+                                                                   error:&error];
+    expect([swapped isEqualToData:shareSet.jointCompressedPublicKey],
+           @"multiplicative share public key should be commutative");
+}
+
+static void testWalletShareEnvelopePersistenceRoundTrip(void) {
+    NSData *envelopeA = [NSData dataWithBytes:"wrapped-a" length:9];
+    NSData *envelopeB = [NSData dataWithBytes:"wrapped-b" length:9];
+    NSData *jointPublicKey = compressedPublicKeyForSecret(scalarData(1));
+
+    WalletShareEnvelope *envelope =
+        [[WalletShareEnvelope alloc] initWithEnvelopeA:envelopeA
+                                            envelopeB:envelopeB
+                             jointCompressedPublicKey:jointPublicKey];
+    NSURL *url = temporaryTestFileURL(@"wallet-share-envelope.plist");
+
+    NSError *error = nil;
+    expect([envelope writeToURL:url error:&error],
+           [NSString stringWithFormat:@"wallet envelope write failed: %@", error]);
+
+    WalletShareEnvelope *loaded = [WalletShareEnvelope loadFromURL:url error:&error];
+    expect(loaded != nil,
+           [NSString stringWithFormat:@"wallet envelope load failed: %@", error]);
+    expect([loaded.envelopeA isEqualToData:envelopeA],
+           @"loaded wallet envelope A did not match");
+    expect([loaded.envelopeB isEqualToData:envelopeB],
+           @"loaded wallet envelope B did not match");
+    expect([loaded.jointCompressedPublicKey isEqualToData:jointPublicKey],
+           @"loaded wallet public key did not match");
+
+    NSDictionary<NSFileAttributeKey, id> *attributes =
+        [[NSFileManager defaultManager] attributesOfItemAtPath:url.path error:&error];
+    expect(attributes != nil,
+           [NSString stringWithFormat:@"could not read wallet envelope attributes: %@", error]);
+    NSNumber *permissions = attributes[NSFilePosixPermissions];
+    expect((permissions.unsignedShortValue & 0777) == 0600,
+           @"wallet envelope file should be owner-readable only");
+}
+
+static void testWalletShareEnvelopeRejectsInvalidPersistence(void) {
+    NSDictionary<NSString *, id> *propertyList = @{
+        @"version": @1,
+        @"envelopeA": [NSData dataWithBytes:"wrapped-a" length:9],
+        @"envelopeB": [NSData dataWithBytes:"wrapped-b" length:9],
+        @"jointCompressedPublicKey": [NSData dataWithBytes:"bad" length:3],
+    };
+    NSError *error = nil;
+    NSData *data = [NSPropertyListSerialization dataWithPropertyList:propertyList
+                                                              format:NSPropertyListBinaryFormat_v1_0
+                                                             options:0
+                                                               error:&error];
+    expect(data != nil,
+           [NSString stringWithFormat:@"test plist serialization failed: %@", error]);
+
+    NSURL *url = temporaryTestFileURL(@"invalid-wallet-share-envelope.plist");
+    expect([[NSFileManager defaultManager] createDirectoryAtURL:[url URLByDeletingLastPathComponent]
+                                    withIntermediateDirectories:YES
+                                                     attributes:nil
+                                                          error:&error],
+           [NSString stringWithFormat:@"test directory creation failed: %@", error]);
+    expect([data writeToURL:url options:NSDataWritingAtomic error:&error],
+           [NSString stringWithFormat:@"test plist write failed: %@", error]);
+
+    WalletShareEnvelope *loaded = [WalletShareEnvelope loadFromURL:url error:&error];
+    expect(loaded == nil, @"invalid wallet envelope unexpectedly loaded");
+    expect([error.domain isEqualToString:WalletShareEnvelopeErrorDomain],
+           @"invalid wallet envelope returned wrong error domain");
+    expect(error.code == WalletShareEnvelopeErrorInvalidPersistentEnvelope,
+           @"invalid wallet envelope returned wrong error code");
+}
+
 static void testSigningBoundaryHeaders(void) {
     macwlt_wallet_t *wallet = NULL;
     macwlt_err_t err = MACWLT_OK;
@@ -103,6 +522,208 @@ static void testSigningBoundaryHeaders(void) {
     expect(MACWLT_FAILURE < MACWLT_SUCCESS, @"C ABI should use int status returns");
     expect(@protocol(SigningServiceProtocol) != nil,
            @"SigningServiceProtocol should be visible to Objective-C callers");
+    expect(SigningServiceErrorDomain.length > 0,
+           @"SigningService should expose its error domain");
+    expect(WalletShareEnvelopeErrorDomain.length > 0,
+           @"WalletShareEnvelope should expose its error domain");
+}
+
+static void testSigningServiceClientDefaultConfiguration(void) {
+    expect([SigningServiceClientDefaultServiceName isEqualToString:@"com.macwlt.SigningService"],
+           @"SigningServiceClient default service name changed unexpectedly");
+
+    SigningServiceClient *client = [SigningServiceClient clientWithDefaultService];
+    expect([client.serviceName isEqualToString:SigningServiceClientDefaultServiceName],
+           @"SigningServiceClient did not use the default service name");
+    [client invalidate];
+}
+
+static void testSigningServiceListenerDelegateExportsService(void) {
+    NSError *initError = nil;
+    SigningService *service = [[SigningService alloc] initWithError:&initError];
+    expect(service != nil,
+           [NSString stringWithFormat:@"SigningService init failed: %@", initError]);
+
+    SigningServiceListenerDelegate *delegate =
+        [[SigningServiceListenerDelegate alloc] initWithService:service];
+    MockXPCConnection *connection = [MockXPCConnection new];
+    NSObject *listener = [NSObject new];
+
+    BOOL accepted = [delegate listener:(NSXPCListener *)listener
+             shouldAcceptNewConnection:(NSXPCConnection *)connection];
+    expect(accepted, @"SigningServiceListenerDelegate rejected a connection");
+    expect(connection.exportedInterface != nil,
+           @"SigningServiceListenerDelegate did not install an exported interface");
+    expect([connection.exportedObject isEqual:service],
+           @"SigningServiceListenerDelegate exported the wrong object");
+    expect(connection.resumed,
+           @"SigningServiceListenerDelegate did not resume the connection");
+}
+
+static void testSigningServiceUnsupportedSigning(void) {
+    NSError *initError = nil;
+    SigningService *service = [[SigningService alloc] initWithError:&initError];
+    expect(service != nil,
+           [NSString stringWithFormat:@"SigningService init failed: %@", initError]);
+
+    __block NSError *psbtError = nil;
+    __block BOOL psbtReplied = NO;
+    [service signPSBT:[NSData dataWithBytes:"x" length:1]
+            withReply:^(NSData *signedPSBT, NSError *error) {
+        psbtReplied = YES;
+        expect(signedPSBT == nil, @"unsupported PSBT signing returned data");
+        psbtError = error;
+    }];
+    expect(psbtReplied, @"PSBT signing did not reply synchronously");
+    expect([psbtError.domain isEqualToString:SigningServiceErrorDomain],
+           @"unsupported PSBT signing returned wrong error domain");
+    expect(psbtError.code == MACWLT_ERR_UNSUPPORTED,
+           @"unsupported PSBT signing returned wrong error code");
+
+    __block NSError *ethError = nil;
+    __block BOOL ethReplied = NO;
+    [service signEthTx:[NSData dataWithBytes:"x" length:1]
+             withReply:^(NSData *signature, NSError *error) {
+        ethReplied = YES;
+        expect(signature == nil, @"unsupported ETH signing returned data");
+        ethError = error;
+    }];
+    expect(ethReplied, @"ETH signing did not reply synchronously");
+    expect([ethError.domain isEqualToString:SigningServiceErrorDomain],
+           @"unsupported ETH signing returned wrong error domain");
+    expect(ethError.code == MACWLT_ERR_UNSUPPORTED,
+           @"unsupported ETH signing returned wrong error code");
+}
+
+static void testSigningServicePubkeyErrors(void) {
+    NSError *initError = nil;
+    SigningService *service = [[SigningService alloc] initWithError:&initError];
+    expect(service != nil,
+           [NSString stringWithFormat:@"SigningService init failed: %@", initError]);
+
+    __block NSError *childError = nil;
+    __block BOOL childReplied = NO;
+    [service exportPubkeyForDerivationPath:@"m/84h/0h/0h/0/0"
+                                 withReply:^(NSData *publicKey, NSError *error) {
+        childReplied = YES;
+        expect(publicKey == nil, @"unsupported child pubkey export returned data");
+        childError = error;
+    }];
+    expect(childReplied, @"child pubkey export did not reply synchronously");
+    expect([childError.domain isEqualToString:SigningServiceErrorDomain],
+           @"unsupported child pubkey export returned wrong error domain");
+    expect(childError.code == MACWLT_ERR_UNSUPPORTED,
+           @"unsupported child pubkey export returned wrong error code");
+
+    __block NSError *rootError = nil;
+    __block BOOL rootReplied = NO;
+    [service exportPubkeyForDerivationPath:@"m"
+                                 withReply:^(NSData *publicKey, NSError *error) {
+        rootReplied = YES;
+        expect(publicKey == nil, @"root pubkey export before bootstrap returned data");
+        rootError = error;
+    }];
+    expect(rootReplied, @"root pubkey export did not reply synchronously");
+    expect([rootError.domain isEqualToString:SigningServiceErrorDomain],
+           @"root pubkey export before bootstrap returned wrong error domain");
+    expect(rootError.code == MACWLT_ERR_UNAVAILABLE,
+           @"root pubkey export before bootstrap returned wrong error code");
+}
+
+static void testMacwltCABIWalletLifecycle(void) {
+    macwlt_wallet_t *wallet = NULL;
+    expect(macwlt_wallet_create(&wallet) == MACWLT_SUCCESS,
+           @"macwlt_wallet_create failed");
+    expect(wallet != NULL, @"macwlt_wallet_create returned a null wallet");
+    expect(macwlt_last_error(wallet) == MACWLT_OK,
+           @"new wallet should start with MACWLT_OK");
+    macwlt_wallet_free(wallet);
+    macwlt_wallet_free(NULL);
+}
+
+static void testMacwltCABIInvalidArguments(void) {
+    expect(macwlt_wallet_create(NULL) == MACWLT_FAILURE,
+           @"macwlt_wallet_create unexpectedly accepted null out pointer");
+    expect(macwlt_last_error(NULL) == MACWLT_ERR_INVALID_ARGUMENT,
+           @"macwlt_last_error should reject null wallet");
+    expect(macwlt_bootstrap_wallet(NULL, NULL, NULL) == MACWLT_FAILURE,
+           @"macwlt_bootstrap_wallet unexpectedly accepted null wallet");
+}
+
+static void testMacwltCABIBootstrapBufferSizing(void) {
+    macwlt_wallet_t *wallet = NULL;
+    expect(macwlt_wallet_create(&wallet) == MACWLT_SUCCESS,
+           @"macwlt_wallet_create failed");
+
+    uint8_t pubkey[1] = {0};
+    size_t pubkeyLength = sizeof(pubkey);
+    expect(macwlt_bootstrap_wallet(wallet, pubkey, &pubkeyLength) == MACWLT_FAILURE,
+           @"macwlt_bootstrap_wallet unexpectedly accepted undersized output buffer");
+    expect(macwlt_last_error(wallet) == MACWLT_ERR_BUFFER_TOO_SMALL,
+           @"undersized bootstrap buffer should set MACWLT_ERR_BUFFER_TOO_SMALL");
+    expect(pubkeyLength == 33,
+           @"bootstrap should report required compressed public key length");
+
+    macwlt_wallet_free(wallet);
+}
+
+static void testMacwltCABIUnsupportedOperations(void) {
+    macwlt_wallet_t *wallet = NULL;
+    expect(macwlt_wallet_create(&wallet) == MACWLT_SUCCESS,
+           @"macwlt_wallet_create failed");
+
+    uint8_t oneByte = 0;
+    size_t oneByteLength = sizeof(oneByte);
+    expect(macwlt_sign_psbt(wallet, &oneByte, sizeof(oneByte), &oneByte, &oneByteLength) == MACWLT_FAILURE,
+           @"macwlt_sign_psbt unexpectedly succeeded before signer implementation");
+    expect(macwlt_last_error(wallet) == MACWLT_ERR_UNSUPPORTED,
+           @"macwlt_sign_psbt should report unsupported");
+
+    expect(macwlt_sign_eth_tx(wallet, &oneByte, sizeof(oneByte), &oneByte, &oneByteLength) == MACWLT_FAILURE,
+           @"macwlt_sign_eth_tx unexpectedly succeeded before signer implementation");
+    expect(macwlt_last_error(wallet) == MACWLT_ERR_UNSUPPORTED,
+           @"macwlt_sign_eth_tx should report unsupported");
+
+    expect(macwlt_export_pubkey(wallet, "m/84h/0h/0h/0/0", &oneByte, &oneByteLength) == MACWLT_FAILURE,
+           @"macwlt_export_pubkey unexpectedly accepted child derivation before derivation implementation");
+    expect(macwlt_last_error(wallet) == MACWLT_ERR_UNSUPPORTED,
+           @"macwlt_export_pubkey child path should report unsupported");
+
+    expect(macwlt_export_attestation(wallet, &oneByte, sizeof(oneByte), &oneByte, &oneByteLength) == MACWLT_FAILURE,
+           @"macwlt_export_attestation unexpectedly succeeded before attestation implementation");
+    expect(macwlt_last_error(wallet) == MACWLT_ERR_UNSUPPORTED,
+           @"macwlt_export_attestation should report unsupported");
+
+    macwlt_wallet_free(wallet);
+}
+
+static void testMacwltCABIRootPubkeyExportStateAndSizing(void) {
+    macwlt_wallet_t *wallet = NULL;
+    expect(macwlt_wallet_create(&wallet) == MACWLT_SUCCESS,
+           @"macwlt_wallet_create failed");
+
+    uint8_t pubkey[1] = {0};
+    size_t pubkeyLength = sizeof(pubkey);
+    expect(macwlt_export_pubkey(wallet, "m", pubkey, &pubkeyLength) == MACWLT_FAILURE,
+           @"macwlt_export_pubkey unexpectedly accepted undersized root pubkey buffer");
+    expect(macwlt_last_error(wallet) == MACWLT_ERR_BUFFER_TOO_SMALL,
+           @"undersized root pubkey buffer should set MACWLT_ERR_BUFFER_TOO_SMALL");
+    expect(pubkeyLength == 33,
+           @"root pubkey export should report required compressed public key length");
+
+    uint8_t fullPubkey[33] = {0};
+    pubkeyLength = sizeof(fullPubkey);
+    expect(macwlt_export_pubkey(wallet, "m", fullPubkey, &pubkeyLength) == MACWLT_FAILURE,
+           @"macwlt_export_pubkey unexpectedly succeeded before bootstrap");
+    expect(macwlt_last_error(wallet) == MACWLT_ERR_UNAVAILABLE,
+           @"root pubkey export before bootstrap should report unavailable");
+
+    expect(macwlt_export_pubkey(wallet, NULL, fullPubkey, &pubkeyLength) == MACWLT_FAILURE,
+           @"macwlt_export_pubkey unexpectedly accepted null derivation path");
+    expect(macwlt_last_error(wallet) == MACWLT_ERR_INVALID_ARGUMENT,
+           @"null derivation path should report invalid argument");
+
+    macwlt_wallet_free(wallet);
 }
 
 int main(void) {
@@ -113,7 +734,26 @@ int main(void) {
         testP2WPKHAddress();
         testEthereumAddress();
         testPSBTInvalidData();
+        testHardenedBufferMasksMemory();
+        testHardenedBufferWipeAndMask();
+        testHardenedShareWindowSequencing();
+        testHardenedShareWindowMasksAfterFailure();
+        testHardenedShareWindowRejectsClosedLoader();
+        testSigningShareSetKnownPublicKey();
+        testSigningShareSetRejectsInvalidShare();
+        testSigningShareSetGeneratedCommutative();
+        testWalletShareEnvelopePersistenceRoundTrip();
+        testWalletShareEnvelopeRejectsInvalidPersistence();
         testSigningBoundaryHeaders();
+        testSigningServiceClientDefaultConfiguration();
+        testSigningServiceListenerDelegateExportsService();
+        testMacwltCABIWalletLifecycle();
+        testMacwltCABIInvalidArguments();
+        testMacwltCABIBootstrapBufferSizing();
+        testMacwltCABIUnsupportedOperations();
+        testMacwltCABIRootPubkeyExportStateAndSizing();
+        testSigningServiceUnsupportedSigning();
+        testSigningServicePubkeyErrors();
         NSLog(@"core tests passed");
     }
     return 0;

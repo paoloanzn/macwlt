@@ -19,7 +19,7 @@ typedef void (^SigningServicePubkeyReply)(NSData * _Nullable publicKey,
 typedef void (^SigningServiceAttestationReply)(NSData * _Nullable attestation,
                                                NSError * _Nullable error);
 
-@protocol SigningServiceProtocol
+@protocol SigningServiceProtocol <NSObject>
 
 - (void)bootstrapWalletWithReply:(SigningServiceBootstrapReply)reply;
 - (void)signPSBT:(NSData *)psbt withReply:(SigningServicePSBTReply)reply;

@@ -4,15 +4,38 @@
 TARGET ?= macwlt
 PREFIX ?= /usr/local
 
-SRC := $(shell find src -type f -name '*.m' | sort)
+ALL_SRC := $(shell find src -type f -name '*.m' | sort)
+APP_SRC := $(filter-out src/xpc/%,$(ALL_SRC))
+SIGNING_SERVICE_SRC := $(filter-out src/core/SigningServiceClient.m,$(filter-out src/ui/%,$(filter-out src/xpc/%,$(ALL_SRC)))) \
+	src/xpc/SigningServiceMain.m
 HEADERS := $(shell find src -type f -name '*.h' | sort)
 TEST_SRC := tests/core_tests.m \
 	src/core/Address.m \
+	src/core/HardenedBuffer.m \
+	src/core/HardenedShareWindow.m \
 	src/core/hex.m \
-	src/core/PSBT.m
+	src/core/macwlt.m \
+	src/core/PSBT.m \
+	src/core/SEKeyManager.m \
+	src/core/SigningServiceClient.m \
+	src/core/SigningService.m \
+	src/core/SigningServiceListenerDelegate.m \
+	src/core/SigningShareSet.m \
+	src/core/WalletEnvelopeManager.m \
+	src/core/WalletShareEnvelope.m
 BUILD_DIR := build
 BIN := $(BUILD_DIR)/$(TARGET)
 TEST_BIN := $(BUILD_DIR)/core_tests
+APP_BUNDLE_ID ?= com.macwlt.App
+APP_BUNDLE := $(BUILD_DIR)/macwlt.app
+APP_BUNDLE_BIN := $(APP_BUNDLE)/Contents/MacOS/$(TARGET)
+APP_INFO_PLIST := src/ui/macwlt-Info.plist
+SIGNING_SERVICE_BUNDLE_ID ?= com.macwlt.SigningService
+SIGNING_SERVICE_BUNDLE := $(BUILD_DIR)/$(SIGNING_SERVICE_BUNDLE_ID).xpc
+SIGNING_SERVICE_BIN := $(SIGNING_SERVICE_BUNDLE)/Contents/MacOS/$(SIGNING_SERVICE_BUNDLE_ID)
+APP_SIGNING_SERVICE_BUNDLE := $(APP_BUNDLE)/Contents/XPCServices/$(SIGNING_SERVICE_BUNDLE_ID).xpc
+SIGNING_SERVICE_INFO_PLIST := src/xpc/com.macwlt.SigningService-Info.plist
+SIGNING_SERVICE_ENTITLEMENTS ?= src/xpc/signing-service.entitlements
 WALLY_DIR := vendor/libwally-core
 WALLY_BUILD_DIR := $(BUILD_DIR)/libwally-core
 WALLY_CONFIGURE := $(WALLY_DIR)/configure
@@ -44,9 +67,13 @@ LDLIBS ?= -framework Foundation -framework Security -framework AppKit -framework
 LDLIBS += $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) -lz
 CODESIGN ?= codesign
 
-.PHONY: build test install clean submodules
+.PHONY: build test install clean submodules signing-service app-bundle
 
-build: $(BIN)
+build: $(BIN) signing-service app-bundle
+
+signing-service: $(SIGNING_SERVICE_BIN)
+
+app-bundle: $(APP_BUNDLE_BIN) $(APP_SIGNING_SERVICE_BUNDLE)
 
 test: $(TEST_BIN)
 	$(TEST_BIN)
@@ -76,10 +103,26 @@ $(WALLY_LIB) $(WALLY_SECP256K1_LIB): $(WALLY_BUILD_STAMP)
 $(XKCP_LIB):
 	$(MAKE) -C $(XKCP_DIR) $(XKCP_TARGET)/libXKCP.a
 
-$(BIN): $(SRC) $(HEADERS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) $(ENTITLEMENTS)
+$(BIN): $(APP_SRC) $(HEADERS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) $(ENTITLEMENTS)
 	@mkdir -p $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(LDLIBS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(APP_SRC) $(LDLIBS)
 	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS)) $@
+
+$(SIGNING_SERVICE_BIN): $(SIGNING_SERVICE_SRC) $(HEADERS) $(SIGNING_SERVICE_INFO_PLIST) $(SIGNING_SERVICE_ENTITLEMENTS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB)
+	@mkdir -p $(SIGNING_SERVICE_BUNDLE)/Contents/MacOS
+	cp $(SIGNING_SERVICE_INFO_PLIST) $(SIGNING_SERVICE_BUNDLE)/Contents/Info.plist
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(SIGNING_SERVICE_SRC) $(LDLIBS)
+	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(if $(SIGNING_SERVICE_ENTITLEMENTS),--entitlements $(SIGNING_SERVICE_ENTITLEMENTS)) $(SIGNING_SERVICE_BUNDLE)
+
+$(APP_BUNDLE_BIN): $(BIN) $(APP_INFO_PLIST)
+	@mkdir -p $(APP_BUNDLE)/Contents/MacOS
+	cp $(APP_INFO_PLIST) $(APP_BUNDLE)/Contents/Info.plist
+	cp $(BIN) $@
+
+$(APP_SIGNING_SERVICE_BUNDLE): $(SIGNING_SERVICE_BIN) $(APP_BUNDLE_BIN)
+	@mkdir -p $(APP_BUNDLE)/Contents/XPCServices
+	ditto $(SIGNING_SERVICE_BUNDLE) $@
+	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(APP_BUNDLE)
 
 $(TEST_BIN): $(TEST_SRC) $(HEADERS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB)
 	@mkdir -p $(BUILD_DIR)
