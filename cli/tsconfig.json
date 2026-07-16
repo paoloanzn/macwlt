@@ -10,5 +10,5 @@
     "isolatedModules": true,
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts", "tsup.config.ts"]
+  "include": ["src/**/*.ts", "e2e/**/*.ts", "tsup.config.ts"]
 }
