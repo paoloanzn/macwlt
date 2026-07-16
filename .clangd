@@ -3,12 +3,23 @@ CompileFlags:
     - -DWALLY_ABI_NO_ELEMENTS
     - -Ivendor/libwally-core/include
     - -Ivendor/libwally-core/src/secp256k1/include
-    - -I../../vendor/libwally-core/include
-    - -I../../vendor/libwally-core/src/secp256k1/include
-    - -I/opt/homebrew/opt/openssl@3/include
+    - -Ivendor/XKCP/bin/.build/generic64/libXKCP.a
+    - -Ivendor/XKCP/bin/generic64/libXKCP.a.headers
 ---
 If:
-  PathMatch: src/core/Mnemonic\.m
-Diagnostics:
-  Suppress:
-    - pp_file_not_found
+  PathMatch: src/.*
+CompileFlags:
+  Add:
+    - -I../../vendor/libwally-core/include
+    - -I../../vendor/libwally-core/src/secp256k1/include
+    - -I../../vendor/XKCP/bin/.build/generic64/libXKCP.a
+    - -I../../vendor/XKCP/bin/generic64/libXKCP.a.headers
+---
+If:
+  PathMatch: tests/.*
+CompileFlags:
+  Add:
+    - -I../vendor/libwally-core/include
+    - -I../vendor/libwally-core/src/secp256k1/include
+    - -I../vendor/XKCP/bin/.build/generic64/libXKCP.a
+    - -I../vendor/XKCP/bin/generic64/libXKCP.a.headers

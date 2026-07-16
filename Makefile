@@ -8,16 +8,11 @@ SRC := $(shell find src -type f -name '*.m' | sort)
 HEADERS := $(shell find src -type f -name '*.h' | sort)
 TEST_SRC := tests/core_tests.m \
 	src/core/Address.m \
-	src/core/Bech32.m \
 	src/core/hex.m \
-	src/core/Mnemonic.m \
-	src/core/PSBT.m \
-	src/core/RIPEMD160.m
+	src/core/PSBT.m
 BUILD_DIR := build
 BIN := $(BUILD_DIR)/$(TARGET)
 TEST_BIN := $(BUILD_DIR)/core_tests
-WORDLIST := bip39-2048.txt
-WORDLIST_INC := $(BUILD_DIR)/bip39_wordlist.inc
 WALLY_DIR := vendor/libwally-core
 WALLY_BUILD_DIR := $(BUILD_DIR)/libwally-core
 WALLY_CONFIGURE := $(WALLY_DIR)/configure
@@ -25,23 +20,28 @@ WALLY_MAKEFILE := $(WALLY_BUILD_DIR)/Makefile
 WALLY_BUILD_STAMP := $(WALLY_BUILD_DIR)/.built
 WALLY_LIB := $(WALLY_BUILD_DIR)/src/.libs/libwallycore.a
 WALLY_SECP256K1_LIB := $(WALLY_BUILD_DIR)/src/secp256k1/.libs/libsecp256k1.a
+XKCP_DIR := vendor/XKCP
+XKCP_TARGET ?= generic64
+XKCP_LIB := $(XKCP_DIR)/bin/$(XKCP_TARGET)/libXKCP.a
 # Ad-hoc builds cannot use restricted entitlements; AMFI kills faked ones.
 ENTITLEMENTS ?=
 CODESIGN_IDENTITY ?= -
 CODESIGN_OPTIONS ?=
 
 CC := $(shell xcrun --find clang 2>/dev/null || command -v clang)
-OPENSSL_PREFIX ?= $(shell brew --prefix openssl@3)
 MACOSX_SDK ?= $(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null)
 export SDKROOT := $(MACOSX_SDK)
 CPPFLAGS ?=
 CFLAGS ?= -fobjc-arc -Wall -Wextra
 LDFLAGS ?=
-CPPFLAGS += -DWALLY_ABI_NO_ELEMENTS -I$(WALLY_DIR)/include -I$(WALLY_DIR)/src/secp256k1/include -I$(OPENSSL_PREFIX)/include
+CPPFLAGS += -DWALLY_ABI_NO_ELEMENTS \
+	-I$(WALLY_DIR)/include \
+	-I$(WALLY_DIR)/src/secp256k1/include \
+	-I$(XKCP_DIR)/bin/.build/$(XKCP_TARGET)/libXKCP.a \
+	-I$(XKCP_DIR)/bin/$(XKCP_TARGET)/libXKCP.a.headers
 CFLAGS += $(if $(MACOSX_SDK),-isysroot $(MACOSX_SDK))
-LDFLAGS += -L$(OPENSSL_PREFIX)/lib
 LDLIBS ?= -framework Foundation -framework Security -framework AppKit -framework Cocoa
-LDLIBS += $(WALLY_LIB) $(WALLY_SECP256K1_LIB) -lcrypto -lz
+LDLIBS += $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) -lz
 CODESIGN ?= codesign
 
 .PHONY: build test install clean submodules
@@ -73,16 +73,15 @@ $(WALLY_BUILD_STAMP): $(WALLY_MAKEFILE)
 
 $(WALLY_LIB) $(WALLY_SECP256K1_LIB): $(WALLY_BUILD_STAMP)
 
-$(WORDLIST_INC): $(WORDLIST)
-	@mkdir -p $(BUILD_DIR)
-	gzip -cn9 $< | xxd -i > $@
+$(XKCP_LIB):
+	$(MAKE) -C $(XKCP_DIR) $(XKCP_TARGET)/libXKCP.a
 
-$(BIN): $(SRC) $(HEADERS) $(WORDLIST_INC) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(ENTITLEMENTS)
+$(BIN): $(SRC) $(HEADERS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) $(ENTITLEMENTS)
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(LDLIBS)
 	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS)) $@
 
-$(TEST_BIN): $(TEST_SRC) $(HEADERS) $(WORDLIST_INC) $(WALLY_LIB) $(WALLY_SECP256K1_LIB)
+$(TEST_BIN): $(TEST_SRC) $(HEADERS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB)
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -I. -o $@ $(TEST_SRC) $(LDLIBS)
 
@@ -92,3 +91,4 @@ install: build
 
 clean:
 	rm -rf $(BUILD_DIR)
+	$(MAKE) -C $(XKCP_DIR) clean

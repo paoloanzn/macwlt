@@ -5,19 +5,18 @@
  */
 
 #import "WalletEnvelopeManager.h"
-#import "BIP32.h"
 #import "SecureWipe.h"
 
 #import <dispatch/dispatch.h>
 #import <secp256k1.h>
 #import <string.h>
+#import <wally_bip32.h>
+#import <wally_core.h>
 
 #define WALLET_ENVELOPE_ERROR_DOMAIN "app.macwlt.envelope.v1"
 
 static const NSUInteger kSecp256k1SecretSize = 32;
 static const NSUInteger kWalletBootstrapAttempts = 128;
-
-static secp256k1_context *gCtx = NULL;
 
 typedef NS_ENUM(NSInteger, WalletEnvelopeErrorCode) {
     WalletEnvelopeErrorContextCreateFailed = 1,
@@ -50,18 +49,22 @@ static void setCFError(NSError **outError, CFErrorRef error) {
     else CFRelease(error);
 }
 
-static secp256k1_context *secp256k1Context(NSError **outError) {
+static BOOL ensureWallyInitialized(void) {
+    static BOOL initialized = NO;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        gCtx = secp256k1_context_create(SECP256K1_CONTEXT_SIGN |
-                                        SECP256K1_CONTEXT_VERIFY);
+        initialized = wally_init(0) == WALLY_OK;
     });
+    return initialized;
+}
 
-    if (!gCtx) {
+static secp256k1_context *secp256k1Context(NSError **outError) {
+    secp256k1_context *ctx = ensureWallyInitialized() ? wally_get_secp_context() : NULL;
+    if (!ctx) {
         setError(outError, WalletEnvelopeErrorContextCreateFailed,
                  @"Could not create secp256k1 context");
     }
-    return gCtx;
+    return ctx;
 }
 
 static BOOL validateSecp256k1Secret(NSData *secret, NSError **outError) {
@@ -192,8 +195,7 @@ static NSMutableData *decryptEnvelope(NSData *envelope,
                           path:(NSString *)path
                      publicKey:(SecKeyRef)publicKey
                          error:(NSError **)outError {
-    secp256k1_context *ctx = secp256k1Context(outError);
-    if (!ctx) return nil;
+    if (!secp256k1Context(outError)) return nil;
 
     const char *pathStr = path.UTF8String;
     if (!pathStr) {
@@ -202,19 +204,29 @@ static NSMutableData *decryptEnvelope(NSData *envelope,
         return nil;
     }
 
-    // Back the node with NSMutableData so it can be wiped with secureClearMutableData.
-    NSMutableData *nodeData = [NSMutableData dataWithLength:sizeof(ExtKey)];
-    ExtKey *node = nodeData.mutableBytes;
-    if (!bip32Derive(ctx, seed.bytes, seed.length, pathStr, node)) {
-        secureClearMutableData(nodeData);
+    struct ext_key root;
+    struct ext_key child;
+    memset(&root, 0, sizeof(root));
+    memset(&child, 0, sizeof(child));
+
+    int ret = bip32_key_from_seed(seed.bytes, seed.length,
+                                  BIP32_VER_MAIN_PRIVATE, 0, &root);
+    if (ret == WALLY_OK) {
+        ret = bip32_key_from_parent_path_str(&root, pathStr, 0,
+                                             BIP32_FLAG_KEY_PRIVATE, &child);
+    }
+    if (ret != WALLY_OK) {
+        secureWipe(&root, sizeof(root));
+        secureWipe(&child, sizeof(child));
         setError(outError, WalletEnvelopeErrorDerivationFailed,
                  @"Could not derive BIP-32 child key for path");
         return nil;
     }
 
-    NSMutableData *secret = [NSMutableData dataWithBytes:node->priv
+    NSMutableData *secret = [NSMutableData dataWithBytes:child.priv_key + 1
                                                  length:kSecp256k1SecretSize];
-    secureClearMutableData(nodeData);
+    secureWipe(&root, sizeof(root));
+    secureWipe(&child, sizeof(child));
 
     NSData *envelope = nil;
     @try {

@@ -7,9 +7,11 @@
 #import <Foundation/Foundation.h>
 
 #import "../src/core/Address.h"
-#import "../src/core/Mnemonic.h"
 #import "../src/core/PSBT.h"
 #import "../src/core/hex.h"
+
+#include <wally_bip39.h>
+#include <wally_core.h>
 
 static void fail(NSString *message) {
     NSLog(@"%@", message);
@@ -40,13 +42,18 @@ static void testHex(void) {
     expect([hex(data) isEqualToString:@"00abff"], @"hex encoding failed");
 }
 
-static void testMnemonicSeed(void) {
+static void testBIP39MnemonicSeed(void) {
     NSArray<NSString *> *words = @[
         @"abandon", @"abandon", @"abandon", @"abandon",
         @"abandon", @"abandon", @"abandon", @"abandon",
         @"abandon", @"abandon", @"abandon", @"about",
     ];
-    NSData *seed = [Mnemonic seedFromWords:words passphrase:@"TREZOR"];
+    NSString *mnemonic = [words componentsJoinedByString:@" "];
+    uint8_t seedBytes[BIP39_SEED_LEN_512];
+    int ret = bip39_mnemonic_to_seed512(mnemonic.UTF8String, "TREZOR",
+                                        seedBytes, sizeof(seedBytes));
+    NSData *seed = ret == WALLY_OK ? [NSData dataWithBytes:seedBytes
+                                                     length:sizeof(seedBytes)] : nil;
     NSString *expected =
         @"c55257c360c07c72029aebc1b53c05ed"
         @"0362ada38ead3e3e9efa3708e5349553"
@@ -54,6 +61,16 @@ static void testMnemonicSeed(void) {
         @"630c7a3c4ab7c81b2f001698e7463b04";
     expect(seed != nil, @"BIP-39 seed derivation returned nil");
     expect([hex(seed) isEqualToString:expected], @"BIP-39 seed vector failed");
+}
+
+static void testP2WPKHAddress(void) {
+    NSData *compressedPublicKey = dataFromHex(
+        @"0279be667ef9dcbbac55a06295ce870b07"
+        @"029bfcdb2dce28d959f2815b16f81798"
+    );
+    NSString *address = p2wpkhAddress(compressedPublicKey, YES);
+    expect([address isEqualToString:@"bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"],
+           [NSString stringWithFormat:@"P2WPKH address vector failed: %@", address]);
 }
 
 static void testEthereumAddress(void) {
@@ -78,8 +95,10 @@ static void testPSBTInvalidData(void) {
 
 int main(void) {
     @autoreleasepool {
+        expect(wally_init(0) == WALLY_OK, @"wally_init failed");
         testHex();
-        testMnemonicSeed();
+        testBIP39MnemonicSeed();
+        testP2WPKHAddress();
         testEthereumAddress();
         testPSBTInvalidData();
         NSLog(@"core tests passed");

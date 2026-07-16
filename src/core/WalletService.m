@@ -9,14 +9,17 @@
 #import "SEKeyManager.h"
 #import "WalletEnvelopeManager.h"
 
-#import <CommonCrypto/CommonDigest.h>
+#import <dispatch/dispatch.h>
 #import <Security/Security.h>
+#import <wally_core.h>
+#import <wally_crypto.h>
 
 #define WALLET_SERVICE_ERROR_DOMAIN "app.macwlt.wallet-service.v1"
 
 typedef NS_ENUM(NSInteger, WalletServiceErrorCode) {
     WalletServiceErrorMissingPublicKey = 1,
     WalletServiceErrorInvalidMessageEncoding,
+    WalletServiceErrorHashFailed,
 };
 
 static NSError *walletServiceError(WalletServiceErrorCode code, NSString *message) {
@@ -29,6 +32,15 @@ static void setWalletServiceError(NSError **outError,
                                   WalletServiceErrorCode code,
                                   NSString *message) {
     if (outError) *outError = walletServiceError(code, message);
+}
+
+static BOOL ensureWallyInitialized(void) {
+    static BOOL initialized = NO;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        initialized = wally_init(0) == WALLY_OK;
+    });
+    return initialized;
 }
 
 @implementation WalletService
@@ -77,8 +89,15 @@ static void setWalletServiceError(NSError **outError,
         return nil;
     }
 
-    uint8_t digest[CC_SHA256_DIGEST_LENGTH];
-    CC_SHA256(messageData.bytes, (CC_LONG)messageData.length, digest);
+    uint8_t digest[SHA256_LEN];
+    if (!ensureWallyInitialized() ||
+        wally_sha256(messageData.bytes, messageData.length,
+                     digest, sizeof(digest)) != WALLY_OK) {
+        setWalletServiceError(outError,
+                              WalletServiceErrorHashFailed,
+                              @"Could not hash message with SHA-256");
+        return nil;
+    }
     NSData *digestData = [NSData dataWithBytes:digest length:sizeof(digest)];
 
     NSError *error = nil;

@@ -8,13 +8,12 @@
 
 #import <dispatch/dispatch.h>
 
-#include <CommonCrypto/CommonDigest.h>
-#include <openssl/evp.h>
+#include <KeccakHash.h>
 #include <secp256k1.h>
 #include <string.h>
-
-#include "Bech32.h"
-#include "RIPEMD160.h"
+#include <wally_address.h>
+#include <wally_core.h>
+#include <wally_crypto.h>
 
 enum {
     kCompressedPubKeyLen = 33,
@@ -26,32 +25,30 @@ enum {
 
 static const char kHexDigits[] = "0123456789abcdef";
 
-static const EVP_MD *keccak256Digest(void) {
-    static EVP_MD *digest = NULL;
+static BOOL ensureWallyInitialized(void) {
+    static BOOL initialized = NO;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        digest = EVP_MD_fetch(NULL, "KECCAK-256", NULL);
+        initialized = wally_init(0) == WALLY_OK;
     });
-    return digest;
+    return initialized;
 }
 
 static BOOL keccak256(const uint8_t *input, NSUInteger inputLen,
                       uint8_t out[kKeccak256DigestLen]) {
-    const EVP_MD *digest = keccak256Digest();
-    if (!digest) return NO;
+    if (inputLen > SIZE_MAX / 8) return NO;
 
-    unsigned int outLen = 0;
-    if (!EVP_Digest(input, inputLen, out, &outLen, digest, NULL)) return NO;
-    return outLen == kKeccak256DigestLen;
+    Keccak_HashInstance hash;
+    if (Keccak_HashInitialize(&hash, 1088, 512, 256, 0x01) != KECCAK_SUCCESS) {
+        return NO;
+    }
+    if (Keccak_HashUpdate(&hash, input, inputLen * 8) != KECCAK_SUCCESS) return NO;
+    return Keccak_HashFinal(&hash, out) == KECCAK_SUCCESS;
 }
 
 static secp256k1_context *addressSecp256k1Context(void) {
-    static secp256k1_context *ctx = NULL;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        ctx = secp256k1_context_create(SECP256K1_CONTEXT_VERIFY);
-    });
-    return ctx;
+    if (!ensureWallyInitialized()) return NULL;
+    return wally_get_secp_context();
 }
 
 static BOOL ethereumUncompressedPublicKey(NSData *publicKey,
@@ -92,16 +89,25 @@ NSString *p2wpkhAddress(NSData *compressedPubKey, BOOL mainnet) {
     const uint8_t *pub = compressedPubKey.bytes;
     if (pub[0] != 0x02 && pub[0] != 0x03) return nil;
 
-    uint8_t sha[CC_SHA256_DIGEST_LENGTH];
-    CC_SHA256(pub, (CC_LONG)kCompressedPubKeyLen, sha);
-    uint8_t hash160[RIPEMD160_DIGEST_LENGTH];
-    ripemd160(sha, sizeof sha, hash160);
+    if (!ensureWallyInitialized()) return nil;
 
-    char out[BECH32_MAX_LEN + 1];
+    uint8_t hash160[HASH160_LEN];
+    if (wally_hash160(pub, kCompressedPubKeyLen, hash160, sizeof(hash160)) != WALLY_OK) {
+        return nil;
+    }
+
+    uint8_t witnessProgram[2 + HASH160_LEN] = {0x00, HASH160_LEN};
+    memcpy(witnessProgram + 2, hash160, sizeof(hash160));
     const char *hrp = mainnet ? "bc" : "tb";
-    if (!segwitAddrEncode(out, hrp, 0, hash160, sizeof hash160)) return nil;
+    char *out = NULL;
+    if (wally_addr_segwit_from_bytes(witnessProgram, sizeof(witnessProgram),
+                                     hrp, 0, &out) != WALLY_OK) {
+        return nil;
+    }
 
-    return [NSString stringWithUTF8String:out];
+    NSString *address = [NSString stringWithUTF8String:out];
+    wally_free_string(out);
+    return address;
 }
 
 NSString *ethereumAddress(NSData *publicKey) {
