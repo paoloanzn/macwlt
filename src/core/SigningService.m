@@ -12,6 +12,8 @@ NSString * const SigningServiceErrorDomain = @"macwlt.SigningService";
 
 typedef int (^SigningServiceCallBlock)(uint8_t * _Nullable output,
                                        size_t *inoutOutputLength);
+typedef int (^SigningServiceStringCallBlock)(char * _Nullable output,
+                                             size_t *inoutOutputLength);
 
 static NSString *messageForMacwltError(macwlt_err_t error) {
     switch (error) {
@@ -132,6 +134,30 @@ static NSError *signingServiceError(macwlt_err_t error) {
     } reply:reply];
 }
 
+- (void)exportAddressForDerivationPath:(NSString *)derivationPath
+                            addressType:(SigningServiceAddressType)addressType
+                              withReply:(SigningServiceAddressReply)reply {
+    NSParameterAssert(reply);
+
+    NSData *pathData = [derivationPath dataUsingEncoding:NSUTF8StringEncoding];
+    if (!pathData) {
+        reply(nil, signingServiceError(MACWLT_ERR_INVALID_ARGUMENT));
+        return;
+    }
+
+    NSMutableData *nulTerminatedPath = [pathData mutableCopy];
+    uint8_t nul = 0;
+    [nulTerminatedPath appendBytes:&nul length:sizeof(nul)];
+
+    [self stringFromDynamicCall:^int(char *output, size_t *inoutOutputLength) {
+        return macwlt_export_address(_wallet,
+                                     nulTerminatedPath.bytes,
+                                     (macwlt_address_type_t)addressType,
+                                     output,
+                                     inoutOutputLength);
+    } reply:reply];
+}
+
 - (void)exportAttestationForChallenge:(NSData *)challenge
                             withReply:(SigningServiceAttestationReply)reply {
     NSParameterAssert(reply);
@@ -171,6 +197,39 @@ static NSError *signingServiceError(macwlt_err_t error) {
 
     output.length = outputLength;
     reply(output, nil);
+}
+
+- (void)stringFromDynamicCall:(SigningServiceStringCallBlock)call
+                        reply:(void (^)(NSString * _Nullable string, NSError * _Nullable error))reply {
+    NSParameterAssert(call);
+    NSParameterAssert(reply);
+
+    size_t outputLength = 0;
+    int status = call(NULL, &outputLength);
+    if (status == MACWLT_SUCCESS) {
+        reply(@"", nil);
+        return;
+    }
+
+    macwlt_err_t error = macwlt_last_error(_wallet);
+    if (error != MACWLT_ERR_BUFFER_TOO_SMALL) {
+        reply(nil, signingServiceError(error));
+        return;
+    }
+
+    NSMutableData *output = [NSMutableData dataWithLength:outputLength];
+    status = call(output.mutableBytes, &outputLength);
+    if (status != MACWLT_SUCCESS) {
+        reply(nil, [self lastError]);
+        return;
+    }
+
+    NSString *string = [NSString stringWithUTF8String:output.bytes];
+    if (!string) {
+        reply(nil, signingServiceError(MACWLT_ERR_INTERNAL));
+        return;
+    }
+    reply(string, nil);
 }
 
 @end

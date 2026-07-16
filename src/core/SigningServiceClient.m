@@ -98,6 +98,20 @@ NSString * const SigningServiceClientDefaultServiceName = @"com.macwlt.SigningSe
     [remote exportPubkeyForDerivationPath:derivationPath withReply:reply];
 }
 
+- (void)exportAddressForDerivationPath:(NSString *)derivationPath
+                            addressType:(SigningServiceAddressType)addressType
+                              withReply:(SigningServiceAddressReply)reply {
+    NSParameterAssert(reply);
+
+    id<SigningServiceProtocol> remote =
+        [self remoteObjectProxyWithErrorHandler:^(NSError *error) {
+            reply(nil, error);
+        }];
+    [remote exportAddressForDerivationPath:derivationPath
+                               addressType:addressType
+                                 withReply:reply];
+}
+
 - (void)exportAttestationForChallenge:(NSData *)challenge
                             withReply:(SigningServiceAttestationReply)reply {
     NSParameterAssert(reply);

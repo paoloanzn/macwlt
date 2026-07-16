@@ -29,6 +29,12 @@ typedef enum macwlt_err {
     MACWLT_ERR_INTERNAL = 9,
 } macwlt_err_t;
 
+typedef enum macwlt_address_type {
+    MACWLT_ADDRESS_BITCOIN_P2WPKH_MAINNET = 1,
+    MACWLT_ADDRESS_BITCOIN_P2WPKH_TESTNET = 2,
+    MACWLT_ADDRESS_ETHEREUM = 3,
+} macwlt_address_type_t;
+
 #define MACWLT_SUCCESS 0
 #define MACWLT_FAILURE (-1)
 
@@ -57,6 +63,12 @@ int macwlt_export_pubkey(macwlt_wallet_t *wallet,
                          const char *derivation_path,
                          uint8_t *out_pubkey,
                          size_t *inout_pubkey_len);
+
+int macwlt_export_address(macwlt_wallet_t *wallet,
+                          const char *derivation_path,
+                          macwlt_address_type_t address_type,
+                          char *out_address,
+                          size_t *inout_address_len);
 
 int macwlt_export_attestation(macwlt_wallet_t *wallet,
                               const uint8_t *challenge,

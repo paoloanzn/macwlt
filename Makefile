@@ -21,7 +21,9 @@ TEST_SRC := tests/core_tests.m \
 	src/core/SigningService.m \
 	src/core/SigningServiceListenerDelegate.m \
 	src/core/SigningShareSet.m \
+	src/core/WalletAddressDerivation.m \
 	src/core/WalletEnvelopeManager.m \
+	src/core/WalletPublicKeyDerivation.m \
 	src/core/WalletShareEnvelope.m
 BUILD_DIR := build
 BIN := $(BUILD_DIR)/$(TARGET)

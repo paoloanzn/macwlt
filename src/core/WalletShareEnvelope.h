@@ -32,6 +32,7 @@ typedef NS_ENUM(NSInteger, WalletShareEnvelopeShare) {
 @property (nonatomic, copy, readonly) NSData *envelopeA;
 @property (nonatomic, copy, readonly) NSData *envelopeB;
 @property (nonatomic, copy, readonly) NSData *jointCompressedPublicKey;
+@property (nonatomic, copy, readonly, nullable) NSData *chainCode;
 
 + (nullable instancetype)bootstrapWithError:(NSError * _Nullable * _Nullable)outError;
 + (NSURL *)defaultStorageURL;
@@ -41,7 +42,12 @@ typedef NS_ENUM(NSInteger, WalletShareEnvelopeShare) {
 
 - (instancetype)initWithEnvelopeA:(NSData *)envelopeA
                          envelopeB:(NSData *)envelopeB
-          jointCompressedPublicKey:(NSData *)jointCompressedPublicKey NS_DESIGNATED_INITIALIZER;
+          jointCompressedPublicKey:(NSData *)jointCompressedPublicKey;
+
+- (instancetype)initWithEnvelopeA:(NSData *)envelopeA
+                         envelopeB:(NSData *)envelopeB
+          jointCompressedPublicKey:(NSData *)jointCompressedPublicKey
+                          chainCode:(nullable NSData *)chainCode NS_DESIGNATED_INITIALIZER;
 
 - (BOOL)writeToURL:(NSURL *)url
              error:(NSError * _Nullable * _Nullable)outError;

@@ -6,6 +6,9 @@
 
 #import "macwlt.h"
 
+#import "Address.h"
+#import "WalletAddressDerivation.h"
+#import "WalletPublicKeyDerivation.h"
 #import "WalletShareEnvelope.h"
 
 #import <Foundation/Foundation.h>
@@ -43,6 +46,120 @@ static WalletShareEnvelope *currentShareEnvelope(macwlt_wallet_t *wallet) {
 
 static BOOL derivationPathIsRoot(const char *derivation_path) {
     return derivation_path && strcmp(derivation_path, "m") == 0;
+}
+
+static BOOL derivationPathStartsAtRoot(const char *derivation_path) {
+    return derivationPathIsRoot(derivation_path) ||
+        (derivation_path && strncmp(derivation_path, "m/", 2) == 0);
+}
+
+static BOOL derivationPathContainsHardenedComponent(const char *derivation_path) {
+    if (!derivation_path) return NO;
+    const char *componentStart = derivation_path;
+    for (const char *p = derivation_path; ; p++) {
+        if (*p == '/' || *p == '\0') {
+            if (p > componentStart) {
+                char last = *(p - 1);
+                if (last == '\'' || last == 'h' || last == 'H') return YES;
+            }
+            if (*p == '\0') return NO;
+            componentStart = p + 1;
+        }
+    }
+}
+
+static macwlt_err_t errorForPublicDerivationError(NSError *error) {
+    if (![error.domain isEqualToString:WalletPublicKeyDerivationErrorDomain]) {
+        return MACWLT_ERR_INTERNAL;
+    }
+
+    switch (error.code) {
+        case WalletPublicKeyDerivationErrorInvalidRootPublicKey:
+        case WalletPublicKeyDerivationErrorInvalidChainCode:
+        case WalletPublicKeyDerivationErrorInvalidPath:
+            return MACWLT_ERR_INVALID_ARGUMENT;
+        case WalletPublicKeyDerivationErrorUnsupportedHardenedPath:
+            return MACWLT_ERR_UNSUPPORTED;
+        case WalletPublicKeyDerivationErrorDerivationFailed:
+        case WalletPublicKeyDerivationErrorRandomFailed:
+            return MACWLT_ERR_INTERNAL;
+    }
+    NSCAssert(NO, @"Unhandled public derivation error code");
+    return MACWLT_ERR_INTERNAL;
+}
+
+static macwlt_err_t errorForAddressDerivationError(NSError *error) {
+    if ([error.domain isEqualToString:WalletPublicKeyDerivationErrorDomain]) {
+        return errorForPublicDerivationError(error);
+    }
+    if (![error.domain isEqualToString:WalletAddressDerivationErrorDomain]) {
+        return MACWLT_ERR_INTERNAL;
+    }
+
+    switch (error.code) {
+        case WalletAddressDerivationErrorUnsupportedAddressType:
+            return MACWLT_ERR_UNSUPPORTED;
+        case WalletAddressDerivationErrorAddressEncodingFailed:
+            return MACWLT_ERR_INTERNAL;
+    }
+    NSCAssert(NO, @"Unhandled address derivation error code");
+    return MACWLT_ERR_INTERNAL;
+}
+
+static BOOL addressTypeIsSupported(macwlt_address_type_t address_type) {
+    switch (address_type) {
+        case MACWLT_ADDRESS_BITCOIN_P2WPKH_MAINNET:
+        case MACWLT_ADDRESS_BITCOIN_P2WPKH_TESTNET:
+        case MACWLT_ADDRESS_ETHEREUM:
+            return YES;
+    }
+    return NO;
+}
+
+static WalletAddressType walletAddressType(macwlt_address_type_t address_type) {
+    switch (address_type) {
+        case MACWLT_ADDRESS_BITCOIN_P2WPKH_MAINNET:
+            return WalletAddressTypeBitcoinP2WPKHMainnet;
+        case MACWLT_ADDRESS_BITCOIN_P2WPKH_TESTNET:
+            return WalletAddressTypeBitcoinP2WPKHTestnet;
+        case MACWLT_ADDRESS_ETHEREUM:
+            return WalletAddressTypeEthereum;
+    }
+    NSCAssert(NO, @"Unhandled C wallet address type");
+    return WalletAddressTypeBitcoinP2WPKHMainnet;
+}
+
+static NSString *addressForPublicKey(NSData *publicKey,
+                                     macwlt_address_type_t address_type) {
+    switch (address_type) {
+        case MACWLT_ADDRESS_BITCOIN_P2WPKH_MAINNET:
+            return p2wpkhAddress(publicKey, YES);
+        case MACWLT_ADDRESS_BITCOIN_P2WPKH_TESTNET:
+            return p2wpkhAddress(publicKey, NO);
+        case MACWLT_ADDRESS_ETHEREUM:
+            return ethereumAddress(publicKey);
+    }
+    NSCAssert(NO, @"Unhandled C wallet address type");
+    return nil;
+}
+
+static int copyAddressString(macwlt_wallet_t *wallet,
+                             NSString *address,
+                             char *out_address,
+                             size_t *inout_address_len) {
+    const char *utf8 = address.UTF8String;
+    if (!utf8) return failWith(wallet, MACWLT_ERR_INTERNAL);
+
+    size_t requiredLength = strlen(utf8) + 1;
+    if (*inout_address_len < requiredLength) {
+        *inout_address_len = requiredLength;
+        return failWith(wallet, MACWLT_ERR_BUFFER_TOO_SMALL);
+    }
+    if (!out_address) return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
+
+    memcpy(out_address, utf8, requiredLength);
+    *inout_address_len = requiredLength;
+    return succeed(wallet);
 }
 
 int macwlt_wallet_create(macwlt_wallet_t **out_wallet) {
@@ -132,7 +249,10 @@ int macwlt_export_pubkey(macwlt_wallet_t *wallet,
     if (!wallet || !derivation_path || !inout_pubkey_len) {
         return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
     }
-    if (!derivationPathIsRoot(derivation_path)) {
+    if (!derivationPathStartsAtRoot(derivation_path)) {
+        return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
+    }
+    if (derivationPathContainsHardenedComponent(derivation_path)) {
         return failWith(wallet, MACWLT_ERR_UNSUPPORTED);
     }
 
@@ -145,14 +265,75 @@ int macwlt_export_pubkey(macwlt_wallet_t *wallet,
     WalletShareEnvelope *shareEnvelope = currentShareEnvelope(wallet);
     if (!shareEnvelope) return failWith(wallet, MACWLT_ERR_UNAVAILABLE);
 
-    NSData *jointPublicKey = shareEnvelope.jointCompressedPublicKey;
-    if (jointPublicKey.length != kCompressedSecp256k1PublicKeyLength) {
+    NSData *publicKey = nil;
+    if (derivationPathIsRoot(derivation_path)) {
+        publicKey = shareEnvelope.jointCompressedPublicKey;
+    } else {
+        NSData *chainCode = shareEnvelope.chainCode;
+        if (!chainCode) return failWith(wallet, MACWLT_ERR_UNAVAILABLE);
+
+        NSString *path = [NSString stringWithUTF8String:derivation_path];
+        if (!path) return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
+
+        NSError *error = nil;
+        publicKey = [WalletPublicKeyDerivation publicKeyForRootCompressedPublicKey:shareEnvelope.jointCompressedPublicKey
+                                                                         chainCode:chainCode
+                                                                    derivationPath:path
+                                                                             error:&error];
+        if (!publicKey) return failWith(wallet, errorForPublicDerivationError(error));
+    }
+
+    if (publicKey.length != kCompressedSecp256k1PublicKeyLength) {
         return failWith(wallet, MACWLT_ERR_INTERNAL);
     }
 
-    memcpy(out_pubkey, jointPublicKey.bytes, jointPublicKey.length);
-    *inout_pubkey_len = jointPublicKey.length;
+    memcpy(out_pubkey, publicKey.bytes, publicKey.length);
+    *inout_pubkey_len = publicKey.length;
     return succeed(wallet);
+}
+
+int macwlt_export_address(macwlt_wallet_t *wallet,
+                          const char *derivation_path,
+                          macwlt_address_type_t address_type,
+                          char *out_address,
+                          size_t *inout_address_len) {
+    if (!wallet || !derivation_path || !inout_address_len) {
+        return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
+    }
+    if (!addressTypeIsSupported(address_type)) {
+        return failWith(wallet, MACWLT_ERR_UNSUPPORTED);
+    }
+    if (!derivationPathStartsAtRoot(derivation_path)) {
+        return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
+    }
+    if (derivationPathContainsHardenedComponent(derivation_path)) {
+        return failWith(wallet, MACWLT_ERR_UNSUPPORTED);
+    }
+
+    WalletShareEnvelope *shareEnvelope = currentShareEnvelope(wallet);
+    if (!shareEnvelope) return failWith(wallet, MACWLT_ERR_UNAVAILABLE);
+
+    NSString *address = nil;
+    if (derivationPathIsRoot(derivation_path)) {
+        address = addressForPublicKey(shareEnvelope.jointCompressedPublicKey, address_type);
+    } else {
+        NSData *chainCode = shareEnvelope.chainCode;
+        if (!chainCode) return failWith(wallet, MACWLT_ERR_UNAVAILABLE);
+
+        NSString *path = [NSString stringWithUTF8String:derivation_path];
+        if (!path) return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
+
+        NSError *error = nil;
+        address = [WalletAddressDerivation addressForRootCompressedPublicKey:shareEnvelope.jointCompressedPublicKey
+                                                                   chainCode:chainCode
+                                                              derivationPath:path
+                                                                 addressType:walletAddressType(address_type)
+                                                                       error:&error];
+        if (!address) return failWith(wallet, errorForAddressDerivationError(error));
+    }
+
+    if (!address) return failWith(wallet, MACWLT_ERR_INTERNAL);
+    return copyAddressString(wallet, address, out_address, inout_address_len);
 }
 
 int macwlt_export_attestation(macwlt_wallet_t *wallet,

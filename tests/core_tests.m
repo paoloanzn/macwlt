@@ -15,6 +15,8 @@
 #import "../src/core/SigningServiceListenerDelegate.h"
 #import "../src/core/SigningServiceProtocol.h"
 #import "../src/core/SigningShareSet.h"
+#import "../src/core/WalletAddressDerivation.h"
+#import "../src/core/WalletPublicKeyDerivation.h"
 #import "../src/core/WalletShareEnvelope.h"
 #import "../src/core/hex.h"
 
@@ -24,6 +26,7 @@
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
+#include <wally_bip32.h>
 #include <wally_bip39.h>
 #include <wally_core.h>
 
@@ -448,15 +451,132 @@ static void testSigningShareSetGeneratedCommutative(void) {
            @"multiplicative share public key should be commutative");
 }
 
+static void testWalletPublicKeyDerivationMatchesWally(void) {
+    NSData *seed = dataFromHex(@"000102030405060708090a0b0c0d0e0f");
+
+    struct ext_key root;
+    struct ext_key child;
+    memset(&root, 0, sizeof(root));
+    memset(&child, 0, sizeof(child));
+
+    int ret = bip32_key_from_seed(seed.bytes, seed.length,
+                                  BIP32_VER_MAIN_PRIVATE, 0, &root);
+    expect(ret == WALLY_OK, @"BIP32 test root derivation failed");
+    ret = bip32_key_from_parent_path_str(&root,
+                                         "m/0/1",
+                                         0,
+                                         BIP32_FLAG_KEY_PUBLIC,
+                                         &child);
+    expect(ret == WALLY_OK, @"BIP32 public child derivation failed");
+
+    NSData *rootPublicKey = [NSData dataWithBytes:root.pub_key length:sizeof(root.pub_key)];
+    NSData *chainCode = [NSData dataWithBytes:root.chain_code length:sizeof(root.chain_code)];
+    NSError *error = nil;
+    NSData *derived = [WalletPublicKeyDerivation publicKeyForRootCompressedPublicKey:rootPublicKey
+                                                                           chainCode:chainCode
+                                                                      derivationPath:@"m/0/1"
+                                                                               error:&error];
+    expect(derived != nil,
+           [NSString stringWithFormat:@"wallet public derivation failed: %@", error]);
+    NSData *expected = [NSData dataWithBytes:child.pub_key length:sizeof(child.pub_key)];
+    expect([derived isEqualToData:expected],
+           @"wallet public derivation did not match libwally");
+}
+
+static void testWalletPublicKeyDerivationRejectsHardenedPath(void) {
+    NSData *rootPublicKey = compressedPublicKeyForSecret(scalarData(1));
+    NSData *chainCode = dataFromHex(
+        @"000102030405060708090a0b0c0d0e0f"
+        @"101112131415161718191a1b1c1d1e1f"
+    );
+
+    NSError *error = nil;
+    NSData *derived = [WalletPublicKeyDerivation publicKeyForRootCompressedPublicKey:rootPublicKey
+                                                                           chainCode:chainCode
+                                                                      derivationPath:@"m/84h/0/0"
+                                                                               error:&error];
+    expect(derived == nil, @"hardened public derivation unexpectedly succeeded");
+    expect([error.domain isEqualToString:WalletPublicKeyDerivationErrorDomain],
+           @"hardened public derivation returned wrong error domain");
+    expect(error.code == WalletPublicKeyDerivationErrorUnsupportedHardenedPath,
+           @"hardened public derivation returned wrong error code");
+}
+
+static void testWalletAddressDerivationMatchesAddressHelpers(void) {
+    NSData *seed = dataFromHex(@"000102030405060708090a0b0c0d0e0f");
+
+    struct ext_key root;
+    memset(&root, 0, sizeof(root));
+    int ret = bip32_key_from_seed(seed.bytes, seed.length,
+                                  BIP32_VER_MAIN_PRIVATE, 0, &root);
+    expect(ret == WALLY_OK, @"BIP32 test root derivation failed");
+
+    NSData *rootPublicKey = [NSData dataWithBytes:root.pub_key length:sizeof(root.pub_key)];
+    NSData *chainCode = [NSData dataWithBytes:root.chain_code length:sizeof(root.chain_code)];
+
+    NSError *error = nil;
+    NSData *derivedPublicKey =
+        [WalletPublicKeyDerivation publicKeyForRootCompressedPublicKey:rootPublicKey
+                                                             chainCode:chainCode
+                                                        derivationPath:@"m/0/1"
+                                                                 error:&error];
+    expect(derivedPublicKey != nil,
+           [NSString stringWithFormat:@"wallet public derivation failed: %@", error]);
+
+    NSString *bitcoinAddress =
+        [WalletAddressDerivation addressForRootCompressedPublicKey:rootPublicKey
+                                                         chainCode:chainCode
+                                                    derivationPath:@"m/0/1"
+                                                       addressType:WalletAddressTypeBitcoinP2WPKHTestnet
+                                                             error:&error];
+    expect([bitcoinAddress isEqualToString:p2wpkhAddress(derivedPublicKey, NO)],
+           @"wallet Bitcoin address derivation did not match helper output");
+
+    NSString *ethAddress =
+        [WalletAddressDerivation addressForRootCompressedPublicKey:rootPublicKey
+                                                         chainCode:chainCode
+                                                    derivationPath:@"m/0/1"
+                                                       addressType:WalletAddressTypeEthereum
+                                                             error:&error];
+    expect([ethAddress isEqualToString:ethereumAddress(derivedPublicKey)],
+           @"wallet Ethereum address derivation did not match helper output");
+}
+
+static void testWalletAddressDerivationRejectsUnsupportedType(void) {
+    NSData *rootPublicKey = compressedPublicKeyForSecret(scalarData(1));
+    NSData *chainCode = dataFromHex(
+        @"000102030405060708090a0b0c0d0e0f"
+        @"101112131415161718191a1b1c1d1e1f"
+    );
+
+    NSError *error = nil;
+    NSString *address =
+        [WalletAddressDerivation addressForRootCompressedPublicKey:rootPublicKey
+                                                         chainCode:chainCode
+                                                    derivationPath:@"m"
+                                                       addressType:(WalletAddressType)999
+                                                             error:&error];
+    expect(address == nil, @"unsupported address type unexpectedly succeeded");
+    expect([error.domain isEqualToString:WalletAddressDerivationErrorDomain],
+           @"unsupported address type returned wrong error domain");
+    expect(error.code == WalletAddressDerivationErrorUnsupportedAddressType,
+           @"unsupported address type returned wrong error code");
+}
+
 static void testWalletShareEnvelopePersistenceRoundTrip(void) {
     NSData *envelopeA = [NSData dataWithBytes:"wrapped-a" length:9];
     NSData *envelopeB = [NSData dataWithBytes:"wrapped-b" length:9];
     NSData *jointPublicKey = compressedPublicKeyForSecret(scalarData(1));
+    NSData *chainCode = dataFromHex(
+        @"000102030405060708090a0b0c0d0e0f"
+        @"101112131415161718191a1b1c1d1e1f"
+    );
 
     WalletShareEnvelope *envelope =
         [[WalletShareEnvelope alloc] initWithEnvelopeA:envelopeA
                                             envelopeB:envelopeB
-                             jointCompressedPublicKey:jointPublicKey];
+                             jointCompressedPublicKey:jointPublicKey
+                                            chainCode:chainCode];
     NSURL *url = temporaryTestFileURL(@"wallet-share-envelope.plist");
 
     NSError *error = nil;
@@ -472,6 +592,8 @@ static void testWalletShareEnvelopePersistenceRoundTrip(void) {
            @"loaded wallet envelope B did not match");
     expect([loaded.jointCompressedPublicKey isEqualToData:jointPublicKey],
            @"loaded wallet public key did not match");
+    expect([loaded.chainCode isEqualToData:chainCode],
+           @"loaded wallet chain code did not match");
 
     NSDictionary<NSFileAttributeKey, id> *attributes =
         [[NSFileManager defaultManager] attributesOfItemAtPath:url.path error:&error];
@@ -694,6 +816,21 @@ static void testMacwltCABIUnsupportedOperations(void) {
     expect(macwlt_last_error(wallet) == MACWLT_ERR_UNSUPPORTED,
            @"macwlt_export_attestation should report unsupported");
 
+    oneByteLength = sizeof(oneByte);
+    expect(macwlt_export_address(wallet, "m", (macwlt_address_type_t)999, (char *)&oneByte, &oneByteLength) == MACWLT_FAILURE,
+           @"macwlt_export_address unexpectedly accepted unsupported address type");
+    expect(macwlt_last_error(wallet) == MACWLT_ERR_UNSUPPORTED,
+           @"unsupported address type should report unsupported");
+
+    oneByteLength = sizeof(oneByte);
+    expect(macwlt_export_address(wallet, "m/84h/0/0",
+                                 MACWLT_ADDRESS_BITCOIN_P2WPKH_MAINNET,
+                                 (char *)&oneByte,
+                                 &oneByteLength) == MACWLT_FAILURE,
+           @"macwlt_export_address unexpectedly accepted hardened public derivation");
+    expect(macwlt_last_error(wallet) == MACWLT_ERR_UNSUPPORTED,
+           @"hardened address derivation should report unsupported");
+
     macwlt_wallet_free(wallet);
 }
 
@@ -723,6 +860,16 @@ static void testMacwltCABIRootPubkeyExportStateAndSizing(void) {
     expect(macwlt_last_error(wallet) == MACWLT_ERR_INVALID_ARGUMENT,
            @"null derivation path should report invalid argument");
 
+    char address[64] = {0};
+    size_t addressLength = sizeof(address);
+    expect(macwlt_export_address(wallet, "m",
+                                 MACWLT_ADDRESS_BITCOIN_P2WPKH_MAINNET,
+                                 address,
+                                 &addressLength) == MACWLT_FAILURE,
+           @"macwlt_export_address unexpectedly succeeded before bootstrap");
+    expect(macwlt_last_error(wallet) == MACWLT_ERR_UNAVAILABLE,
+           @"address export before bootstrap should report unavailable");
+
     macwlt_wallet_free(wallet);
 }
 
@@ -742,6 +889,10 @@ int main(void) {
         testSigningShareSetKnownPublicKey();
         testSigningShareSetRejectsInvalidShare();
         testSigningShareSetGeneratedCommutative();
+        testWalletPublicKeyDerivationMatchesWally();
+        testWalletPublicKeyDerivationRejectsHardenedPath();
+        testWalletAddressDerivationMatchesAddressHelpers();
+        testWalletAddressDerivationRejectsUnsupportedType();
         testWalletShareEnvelopePersistenceRoundTrip();
         testWalletShareEnvelopeRejectsInvalidPersistence();
         testSigningBoundaryHeaders();

@@ -11,6 +11,7 @@
 #import "SecureWipe.h"
 #import "SigningShareSet.h"
 #import "WalletEnvelopeManager.h"
+#import "WalletPublicKeyDerivation.h"
 
 #import <Security/Security.h>
 
@@ -23,7 +24,9 @@ static NSString * const kWalletShareEnvelopeVersionKey = @"version";
 static NSString * const kWalletShareEnvelopeEnvelopeAKey = @"envelopeA";
 static NSString * const kWalletShareEnvelopeEnvelopeBKey = @"envelopeB";
 static NSString * const kWalletShareEnvelopeJointPublicKeyKey = @"jointCompressedPublicKey";
-static const NSInteger kWalletShareEnvelopeCurrentVersion = 1;
+static NSString * const kWalletShareEnvelopeChainCodeKey = @"chainCode";
+static const NSInteger kWalletShareEnvelopeLegacyVersion = 1;
+static const NSInteger kWalletShareEnvelopeCurrentVersion = 2;
 
 static NSError *walletShareEnvelopeError(WalletShareEnvelopeErrorCode code,
                                          NSString *message) {
@@ -94,8 +97,15 @@ static NSDictionary<NSString *, id> *validatedPersistentDictionary(id propertyLi
 
     NSDictionary<NSString *, id> *dictionary = (NSDictionary<NSString *, id> *)propertyList;
     id version = dictionary[kWalletShareEnvelopeVersionKey];
-    if (![version isKindOfClass:NSNumber.class] ||
-        ((NSNumber *)version).integerValue != kWalletShareEnvelopeCurrentVersion) {
+    if (![version isKindOfClass:NSNumber.class]) {
+        setWalletShareEnvelopeError(outError,
+                                    WalletShareEnvelopeErrorInvalidPersistentEnvelope,
+                                    @"Persistent wallet envelope has an unsupported version");
+        return nil;
+    }
+    NSInteger versionValue = ((NSNumber *)version).integerValue;
+    if (versionValue != kWalletShareEnvelopeLegacyVersion &&
+        versionValue != kWalletShareEnvelopeCurrentVersion) {
         setWalletShareEnvelopeError(outError,
                                     WalletShareEnvelopeErrorInvalidPersistentEnvelope,
                                     @"Persistent wallet envelope has an unsupported version");
@@ -152,6 +162,12 @@ static SEKeyPurpose keyPurposeForShare(WalletShareEnvelopeShare share) {
     NSMutableData *shareA = [shareSet.shareA mutableCopy];
     NSMutableData *shareB = [shareSet.shareB mutableCopy];
     NSData *jointPublicKey = shareSet.jointCompressedPublicKey;
+    NSData *chainCode = [WalletPublicKeyDerivation randomChainCodeWithError:outError];
+    if (!chainCode) {
+        secureWipe(shareA.mutableBytes, shareA.length);
+        secureWipe(shareB.mutableBytes, shareB.length);
+        return nil;
+    }
 
     NSData *envelopeA = nil;
     NSData *envelopeB = nil;
@@ -168,7 +184,8 @@ static SEKeyPurpose keyPurposeForShare(WalletShareEnvelopeShare share) {
 
     return [[self alloc] initWithEnvelopeA:envelopeA
                                  envelopeB:envelopeB
-                  jointCompressedPublicKey:jointPublicKey];
+                  jointCompressedPublicKey:jointPublicKey
+                                  chainCode:chainCode];
 }
 
 + (NSURL *)defaultStorageURL {
@@ -240,23 +257,46 @@ static SEKeyPurpose keyPurposeForShare(WalletShareEnvelopeShare share) {
                                                 outError);
     if (!jointPublicKey) return nil;
 
+    NSData *chainCode = nil;
+    NSNumber *version = dictionary[kWalletShareEnvelopeVersionKey];
+    if (version.integerValue >= kWalletShareEnvelopeCurrentVersion) {
+        chainCode = validatedDataValue(dictionary,
+                                       kWalletShareEnvelopeChainCodeKey,
+                                       32,
+                                       outError);
+        if (!chainCode) return nil;
+    }
+
     return [[self alloc] initWithEnvelopeA:envelopeA
                                  envelopeB:envelopeB
-                  jointCompressedPublicKey:jointPublicKey];
+                  jointCompressedPublicKey:jointPublicKey
+                                  chainCode:chainCode];
 }
 
 - (instancetype)initWithEnvelopeA:(NSData *)envelopeA
                          envelopeB:(NSData *)envelopeB
           jointCompressedPublicKey:(NSData *)jointCompressedPublicKey {
+    return [self initWithEnvelopeA:envelopeA
+                         envelopeB:envelopeB
+          jointCompressedPublicKey:jointCompressedPublicKey
+                         chainCode:nil];
+}
+
+- (instancetype)initWithEnvelopeA:(NSData *)envelopeA
+                         envelopeB:(NSData *)envelopeB
+          jointCompressedPublicKey:(NSData *)jointCompressedPublicKey
+                          chainCode:(NSData *)chainCode {
     NSParameterAssert(envelopeA.length > 0);
     NSParameterAssert(envelopeB.length > 0);
     NSParameterAssert(jointCompressedPublicKey.length == 33);
+    NSParameterAssert(!chainCode || chainCode.length == 32);
 
     self = [super init];
     if (self) {
         _envelopeA = [envelopeA copy];
         _envelopeB = [envelopeB copy];
         _jointCompressedPublicKey = [jointCompressedPublicKey copy];
+        _chainCode = [chainCode copy];
     }
     return self;
 }
@@ -265,12 +305,13 @@ static SEKeyPurpose keyPurposeForShare(WalletShareEnvelopeShare share) {
     NSParameterAssert(url);
     NSParameterAssert(url.isFileURL);
 
-    NSDictionary<NSString *, id> *propertyList = @{
-        kWalletShareEnvelopeVersionKey: @(kWalletShareEnvelopeCurrentVersion),
+    NSMutableDictionary<NSString *, id> *propertyList = [@{
+        kWalletShareEnvelopeVersionKey: self.chainCode ? @(kWalletShareEnvelopeCurrentVersion) : @(kWalletShareEnvelopeLegacyVersion),
         kWalletShareEnvelopeEnvelopeAKey: self.envelopeA,
         kWalletShareEnvelopeEnvelopeBKey: self.envelopeB,
         kWalletShareEnvelopeJointPublicKeyKey: self.jointCompressedPublicKey,
-    };
+    } mutableCopy];
+    if (self.chainCode) propertyList[kWalletShareEnvelopeChainCodeKey] = self.chainCode;
 
     NSData *data = [NSPropertyListSerialization dataWithPropertyList:propertyList
                                                               format:NSPropertyListBinaryFormat_v1_0
