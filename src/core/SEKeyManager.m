@@ -117,6 +117,64 @@ static NSData *tagDataForPurpose(SEKeyPurpose purpose) {
     return [tag dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+static NSDictionary *keychainQueryForPurpose(SEKeyPurpose purpose, BOOL returnRef) {
+    NSMutableDictionary *query = [@{
+        (__bridge id)kSecClass: (__bridge id)kSecClassKey,
+        (__bridge id)kSecAttrApplicationTag: tagDataForPurpose(purpose),
+        (__bridge id)kSecAttrKeyType: (__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
+        (__bridge id)kSecUseDataProtectionKeychain: @YES,
+    } mutableCopy];
+    if (returnRef) query[(__bridge id)kSecReturnRef] = @YES;
+    return query;
+}
+
+static SecKeyRef copyPermanentSEKeyForPurpose(SEKeyPurpose purpose,
+                                              NSError **outError) CF_RETURNS_RETAINED {
+    CFTypeRef item = NULL;
+    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)keychainQueryForPurpose(purpose, YES),
+                                          &item);
+    if (status == errSecSuccess) return (SecKeyRef)item;
+    if (status != errSecItemNotFound) {
+        if (outError) {
+            *outError = [NSError errorWithDomain:NSOSStatusErrorDomain
+                                            code:status
+                                        userInfo:@{NSLocalizedDescriptionKey: @"Could not load Secure Enclave key"}];
+        }
+        return NULL;
+    }
+
+    SEKeyPurposeConfig config = configForPurpose(purpose);
+    CFErrorRef accessError = NULL;
+    SecAccessControlRef access = SecAccessControlCreateWithFlags(
+        kCFAllocatorDefault,
+        kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+        config.accessFlags,
+        &accessError
+    );
+    if (!access) {
+        setCFError(outError, accessError);
+        return NULL;
+    }
+
+    NSDictionary *attrs = @{
+        (__bridge id)kSecAttrKeyType: (__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
+        (__bridge id)kSecAttrKeySizeInBits: @256,
+        (__bridge id)kSecAttrTokenID: (__bridge id)kSecAttrTokenIDSecureEnclave,
+        (__bridge id)kSecUseDataProtectionKeychain: @YES,
+        (__bridge id)kSecPrivateKeyAttrs: @{
+            (__bridge id)kSecAttrIsPermanent: @YES,
+            (__bridge id)kSecAttrApplicationTag: tagDataForPurpose(purpose),
+            (__bridge id)kSecAttrAccessControl: (__bridge id)access,
+        },
+    };
+
+    CFErrorRef keyError = NULL;
+    SecKeyRef key = SecKeyCreateRandomKey((__bridge CFDictionaryRef)attrs, &keyError);
+    CFRelease(access);
+    if (!key) setCFError(outError, keyError);
+    return key;
+}
+
 static SecKeyRef makeSEKeyForPurpose(SEKeyPurpose purpose,
                                      NSData **outBlob,
                                      NSError **outError) {
@@ -221,6 +279,9 @@ static BOOL probeSecureEnclaveAvailability(void) {
 }
 
 + (SecKeyRef)copyKeyForPurpose:(SEKeyPurpose)purpose error:(NSError **)outError {
+    SecKeyRef permanentKey = copyPermanentSEKeyForPurpose(purpose, NULL);
+    if (permanentKey) return permanentKey;
+
     NSError *storageError = nil;
     NSData *stored = loadStoredBlobForPurpose(purpose, &storageError);
     if (storageError) {
@@ -237,6 +298,25 @@ static BOOL probeSecureEnclaveAvailability(void) {
         return NULL;
     }
     return key;
+}
+
++ (BOOL)deleteAllManagedKeysWithError:(NSError **)outError {
+    SEKeyPurpose purposes[] = {
+        SEKeyPurposeLegacyEnvelope,
+        SEKeyPurposeSigningShareA,
+        SEKeyPurposeSigningShareB,
+    };
+    for (NSUInteger index = 0; index < sizeof(purposes) / sizeof(purposes[0]); index++) {
+        OSStatus status = SecItemDelete((__bridge CFDictionaryRef)keychainQueryForPurpose(purposes[index], NO));
+        (void)status;
+
+        NSString *blobPath = blobPathForPurpose(purposes[index]);
+        if ([[NSFileManager defaultManager] fileExistsAtPath:blobPath] &&
+            ![[NSFileManager defaultManager] removeItemAtPath:blobPath error:outError]) {
+            return NO;
+        }
+    }
+    return YES;
 }
 
 @end

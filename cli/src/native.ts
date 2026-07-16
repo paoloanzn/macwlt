@@ -10,6 +10,8 @@ const nativeSymbols = {
   macwlt_wallet_create: { args: ["ptr"], returns: "int" },
   macwlt_wallet_free: { args: ["ptr"], returns: "void" },
   macwlt_last_error: { args: ["ptr"], returns: "int" },
+  macwlt_last_error_message: { args: ["ptr"], returns: "cstring" },
+  macwlt_reset_wallet: { args: ["ptr"], returns: "int" },
   macwlt_bootstrap_wallet: { args: ["ptr", "ptr", "ptr"], returns: "int" },
   macwlt_sign_psbt: { args: ["ptr", "ptr", "usize", "ptr", "ptr"], returns: "int" },
   macwlt_sign_eth_tx: { args: ["ptr", "ptr", "usize", "ptr", "ptr"], returns: "int" },
@@ -33,6 +35,7 @@ export type NativeClient = {
 };
 
 export type NativeWallet = {
+  readonly reset: () => Result<void, NativeError>;
   readonly bootstrap: () => Result<Uint8Array, NativeError>;
   readonly exportPubkey: (derivationPath: string) => Result<Uint8Array, NativeError>;
   readonly exportAddress: (derivationPath: string, addressType: AddressType) => Result<string, NativeError>;
@@ -95,6 +98,13 @@ function createWallet(symbols: NativeSymbols): Result<NativeWallet & { readonly 
     close: () => {
       symbols.macwlt_wallet_free(walletPointer);
     },
+    reset: () => {
+      const status = symbols.macwlt_reset_wallet(walletPointer);
+      if (status !== MACWLT_SUCCESS) {
+        return err(nativeError(symbols, walletPointer, "reset wallet", symbols.macwlt_last_error(walletPointer)));
+      }
+      return ok(undefined);
+    },
     bootstrap: () => outputBytes(symbols, walletPointer, "bootstrap", 33, (output, length) =>
       symbols.macwlt_bootstrap_wallet(walletPointer, output, length)
     ),
@@ -141,7 +151,7 @@ function outputBytes(
 
   const firstError = symbols.macwlt_last_error(walletPointer);
   if (firstError !== MACWLT_ERR_BUFFER_TOO_SMALL) {
-    return err(nativeError(operation, firstError));
+    return err(nativeError(symbols, walletPointer, operation, firstError));
   }
 
   const requiredLength = sizeFromSlot(operation, firstLength);
@@ -150,7 +160,7 @@ function outputBytes(
   const retryBuffer = new Uint8Array(requiredLength.value);
   const retryStatus = call(ptr(retryBuffer), ptr(retryLength));
   if (retryStatus !== MACWLT_SUCCESS) {
-    return err(nativeError(operation, symbols.macwlt_last_error(walletPointer)));
+    return err(nativeError(symbols, walletPointer, operation, symbols.macwlt_last_error(walletPointer)));
   }
 
   const finalLength = sizeFromSlot(operation, retryLength);
@@ -184,8 +194,10 @@ function nativeAddressType(addressType: AddressType): number {
   }
 }
 
-function nativeError(operation: string, code: number): NativeError {
-  return { kind: "native", operation, code, message: messageForNativeCode(code) };
+function nativeError(symbols: NativeSymbols, walletPointer: Pointer, operation: string, code: number): NativeError {
+  const nativeMessage = symbols.macwlt_last_error_message(walletPointer);
+  const message = nativeMessage ? nativeMessage.toString() : messageForNativeCode(code);
+  return { kind: "native", operation, code, message };
 }
 
 function messageForNativeCode(code: number): string {

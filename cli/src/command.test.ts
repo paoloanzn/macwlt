@@ -16,4 +16,11 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("native library not found");
   });
+
+  test("requires an explicit confirmation for reset", async () => {
+    const result = await runCli(["reset"], { MACWLT_LIB: "/missing/libmacwlt.dylib" });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("reset requires --yes");
+  });
 });

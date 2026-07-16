@@ -44,7 +44,8 @@ export async function runCli(args: readonly string[], env: NodeJS.ProcessEnv = p
 type Command =
   | { readonly kind: "help" }
   | { readonly kind: "version" }
-  | { readonly kind: "create"; readonly json: boolean }
+  | { readonly kind: "create"; readonly reset: boolean; readonly json: boolean }
+  | { readonly kind: "reset"; readonly json: boolean }
   | { readonly kind: "pubkey"; readonly derivationPath: string; readonly json: boolean }
   | { readonly kind: "address"; readonly derivationPath: string; readonly addressType: AddressType; readonly json: boolean }
   | { readonly kind: "sign-eth"; readonly input: BytesInput; readonly json: boolean }
@@ -67,9 +68,20 @@ async function executeCommand(command: Exclude<Command, { readonly kind: "help" 
   switch (command.kind) {
     case "create":
       return withWalletText(client, (wallet) => {
+        if (command.reset) {
+          const reset = wallet.reset();
+          if (!reset.ok) return err(formatNativeError(reset.error));
+        }
         const publicKey = wallet.bootstrap();
         if (!publicKey.ok) return err(formatNativeError(publicKey.error));
         return ok(formatDataOutput(publicKey.value, command.json, "jointPublicKey"));
+      });
+    case "reset":
+      return withWalletText(client, (wallet) => {
+        const reset = wallet.reset();
+        if (!reset.ok) return err(formatNativeError(reset.error));
+        if (!command.json) return ok("wallet reset");
+        return ok(JSON.stringify({ reset: true }, null, 2));
       });
     case "pubkey":
       return withWalletText(client, (wallet) => {
@@ -140,6 +152,8 @@ function parseCommand(args: readonly string[]): Result<Command, string> {
   switch (name) {
     case "create":
       return parseCreate(rest);
+    case "reset":
+      return parseReset(rest);
     case "pubkey":
       return parsePubkey(rest);
     case "address":
@@ -157,7 +171,15 @@ function parseCreate(args: readonly string[]): Result<Command, string> {
   const flags = parseFlags(args);
   if (!flags.ok) return flags;
   if (flags.value.positionals.length > 0) return err("create does not accept positional arguments");
-  return ok({ kind: "create", json: flags.value.json });
+  return ok({ kind: "create", reset: flags.value.switches.has("reset"), json: flags.value.json });
+}
+
+function parseReset(args: readonly string[]): Result<Command, string> {
+  const flags = parseFlags(args);
+  if (!flags.ok) return flags;
+  if (flags.value.positionals.length > 0) return err("reset does not accept positional arguments");
+  if (!flags.value.switches.has("yes")) return err("reset requires --yes");
+  return ok({ kind: "reset", json: flags.value.json });
 }
 
 function parsePubkey(args: readonly string[]): Result<Command, string> {
@@ -207,18 +229,24 @@ type ParsedFlags = {
   readonly json: boolean;
   readonly positionals: readonly string[];
   readonly options: ReadonlyMap<string, string>;
+  readonly switches: ReadonlySet<string>;
 };
 
 function parseFlags(args: readonly string[]): Result<ParsedFlags, string> {
   let json = false;
   const positionals: string[] = [];
   const options = new Map<string, string>();
+  const switches = new Set<string>();
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (!arg) continue;
     if (arg === "--json") {
       json = true;
+      continue;
+    }
+    if (arg === "--reset" || arg === "--yes") {
+      switches.add(arg.slice(2));
       continue;
     }
     if (!arg.startsWith("--")) {
@@ -234,7 +262,7 @@ function parseFlags(args: readonly string[]): Result<ParsedFlags, string> {
     index++;
   }
 
-  return ok({ json, positionals, options });
+  return ok({ json, positionals, options, switches });
 }
 
 function parseBytesInput(options: ReadonlyMap<string, string>, allowed: readonly string[]): Result<BytesInput, string> {
@@ -321,7 +349,8 @@ function formatPsbtHelp(): string {
 function helpText(): string {
   return [
     "Usage:",
-    "  macwlt create [--json]",
+    "  macwlt create [--reset] [--json]",
+    "  macwlt reset --yes [--json]",
     "  macwlt pubkey [path] [--json]",
     "  macwlt address [path] --type bitcoin|bitcoin-testnet|ethereum [--json]",
     "  macwlt sign-eth --hex <typed-transaction-preimage-hex> [--json]",

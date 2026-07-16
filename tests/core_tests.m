@@ -813,6 +813,8 @@ static void testMacwltCABIWalletLifecycle(void) {
     expect(wallet != NULL, @"macwlt_wallet_create returned a null wallet");
     expect(macwlt_last_error(wallet) == MACWLT_OK,
            @"new wallet should start with MACWLT_OK");
+    expect(strcmp(macwlt_last_error_message(wallet), "ok") == 0,
+           @"new wallet should expose an ok error message");
     macwlt_wallet_free(wallet);
     macwlt_wallet_free(NULL);
 }
@@ -822,6 +824,8 @@ static void testMacwltCABIInvalidArguments(void) {
            @"macwlt_wallet_create unexpectedly accepted null out pointer");
     expect(macwlt_last_error(NULL) == MACWLT_ERR_INVALID_ARGUMENT,
            @"macwlt_last_error should reject null wallet");
+    expect(strcmp(macwlt_last_error_message(NULL), "invalid argument") == 0,
+           @"macwlt_last_error_message should reject null wallet");
     expect(macwlt_bootstrap_wallet(NULL, NULL, NULL) == MACWLT_FAILURE,
            @"macwlt_bootstrap_wallet unexpectedly accepted null wallet");
 }

@@ -7,6 +7,7 @@
 #import "macwlt.h"
 
 #import "Address.h"
+#import "SEKeyManager.h"
 #import "WalletAddressDerivation.h"
 #import "WalletPublicKeyDerivation.h"
 #import "WalletSigner.h"
@@ -19,18 +20,75 @@
 
 struct macwlt_wallet {
     macwlt_err_t last_error;
+    char *last_error_message;
     void *share_envelope;
 };
 
 static const size_t kCompressedSecp256k1PublicKeyLength = 33;
 
+static const char *defaultMessageForError(macwlt_err_t error) {
+    switch (error) {
+        case MACWLT_OK:
+            return "ok";
+        case MACWLT_ERR_INVALID_ARGUMENT:
+            return "invalid argument";
+        case MACWLT_ERR_UNAVAILABLE:
+            return "wallet data is unavailable";
+        case MACWLT_ERR_AUTH_REQUIRED:
+            return "authentication is required";
+        case MACWLT_ERR_AUTH_FAILED:
+            return "authentication failed";
+        case MACWLT_ERR_BUFFER_TOO_SMALL:
+            return "output buffer is too small";
+        case MACWLT_ERR_UNSUPPORTED:
+            return "operation is unsupported";
+        case MACWLT_ERR_PARSE_FAILED:
+            return "input parsing failed";
+        case MACWLT_ERR_SIGNING_FAILED:
+            return "signing failed";
+        case MACWLT_ERR_INTERNAL:
+            return "internal native error";
+    }
+    NSCAssert(NO, @"Unhandled macwlt error code");
+    return "unknown native error";
+}
+
+static void setLastErrorMessage(macwlt_wallet_t *wallet, const char *message) {
+    if (!wallet) return;
+    free(wallet->last_error_message);
+    wallet->last_error_message = message ? strdup(message) : NULL;
+}
+
+static NSString *messageForNSError(NSError *error) {
+    if (!error) return nil;
+    NSString *description = error.localizedDescription;
+    if (description.length > 0) return description;
+    return [NSString stringWithFormat:@"%@ (%ld)", error.domain, (long)error.code];
+}
+
 static int failWith(macwlt_wallet_t *wallet, macwlt_err_t error) {
-    if (wallet) wallet->last_error = error;
+    if (wallet) {
+        wallet->last_error = error;
+        setLastErrorMessage(wallet, defaultMessageForError(error));
+    }
+    return MACWLT_FAILURE;
+}
+
+static int failWithMessage(macwlt_wallet_t *wallet,
+                           macwlt_err_t error,
+                           NSString *message) {
+    if (wallet) {
+        wallet->last_error = error;
+        setLastErrorMessage(wallet, message.UTF8String ?: defaultMessageForError(error));
+    }
     return MACWLT_FAILURE;
 }
 
 static int succeed(macwlt_wallet_t *wallet) {
-    if (wallet) wallet->last_error = MACWLT_OK;
+    if (wallet) {
+        wallet->last_error = MACWLT_OK;
+        setLastErrorMessage(wallet, defaultMessageForError(MACWLT_OK));
+    }
     return MACWLT_SUCCESS;
 }
 
@@ -43,6 +101,12 @@ static WalletShareEnvelope *currentShareEnvelope(macwlt_wallet_t *wallet) {
     return wallet && wallet->share_envelope
         ? (__bridge WalletShareEnvelope *)wallet->share_envelope
         : nil;
+}
+
+static void clearShareEnvelope(macwlt_wallet_t *wallet) {
+    if (!wallet || !wallet->share_envelope) return;
+    (void)CFBridgingRelease(wallet->share_envelope);
+    wallet->share_envelope = NULL;
 }
 
 static BOOL derivationPathIsRoot(const char *derivation_path) {
@@ -207,18 +271,49 @@ int macwlt_wallet_create(macwlt_wallet_t **out_wallet) {
     if (!wallet) return MACWLT_FAILURE;
 
     wallet->last_error = MACWLT_OK;
+    setLastErrorMessage(wallet, defaultMessageForError(MACWLT_OK));
     *out_wallet = wallet;
     return MACWLT_SUCCESS;
 }
 
 void macwlt_wallet_free(macwlt_wallet_t *wallet) {
     if (!wallet) return;
-    if (wallet->share_envelope) (void)CFBridgingRelease(wallet->share_envelope);
+    clearShareEnvelope(wallet);
+    free(wallet->last_error_message);
     free(wallet);
 }
 
 macwlt_err_t macwlt_last_error(macwlt_wallet_t *wallet) {
     return wallet ? wallet->last_error : MACWLT_ERR_INVALID_ARGUMENT;
+}
+
+const char *macwlt_last_error_message(macwlt_wallet_t *wallet) {
+    if (!wallet) return defaultMessageForError(MACWLT_ERR_INVALID_ARGUMENT);
+    return wallet->last_error_message ?: defaultMessageForError(wallet->last_error);
+}
+
+int macwlt_reset_wallet(macwlt_wallet_t *wallet) {
+    if (!wallet) return MACWLT_FAILURE;
+
+    clearShareEnvelope(wallet);
+
+    @autoreleasepool {
+        NSError *error = nil;
+        NSURL *storageURL = [WalletShareEnvelope defaultStorageURL];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:storageURL.path] &&
+            ![[NSFileManager defaultManager] removeItemAtURL:storageURL error:&error]) {
+            return failWithMessage(wallet,
+                                   MACWLT_ERR_UNAVAILABLE,
+                                   messageForNSError(error));
+        }
+
+        if (![SEKeyManager deleteAllManagedKeysWithError:&error]) {
+            return failWithMessage(wallet,
+                                   MACWLT_ERR_UNAVAILABLE,
+                                   messageForNSError(error));
+        }
+        return succeed(wallet);
+    }
 }
 
 int macwlt_bootstrap_wallet(macwlt_wallet_t *wallet,
@@ -239,8 +334,9 @@ int macwlt_bootstrap_wallet(macwlt_wallet_t *wallet,
         WalletShareEnvelope *shareEnvelope =
             [WalletShareEnvelope loadOrBootstrapFromDefaultStorageWithError:&error];
         if (!shareEnvelope) {
-            (void)error;
-            return failWith(wallet, MACWLT_ERR_UNAVAILABLE);
+            return failWithMessage(wallet,
+                                   MACWLT_ERR_UNAVAILABLE,
+                                   messageForNSError(error));
         }
 
         NSData *jointPublicKey = shareEnvelope.jointCompressedPublicKey;
@@ -272,7 +368,11 @@ int macwlt_sign_psbt(macwlt_wallet_t *wallet,
             [WalletSigner signedPSBTForData:[NSData dataWithBytes:psbt length:psbt_len]
                               shareEnvelope:shareEnvelope
                                       error:&error];
-        if (!signedPSBT) return failWith(wallet, errorForSignerError(error));
+        if (!signedPSBT) {
+            return failWithMessage(wallet,
+                                   errorForSignerError(error),
+                                   messageForNSError(error));
+        }
         return copyData(wallet, signedPSBT, out_signed_psbt, inout_signed_psbt_len);
     }
 }
@@ -295,7 +395,11 @@ int macwlt_sign_eth_tx(macwlt_wallet_t *wallet,
                                                                          length:transaction_len]
                                            shareEnvelope:shareEnvelope
                                                    error:&error];
-        if (!signature) return failWith(wallet, errorForSignerError(error));
+        if (!signature) {
+            return failWithMessage(wallet,
+                                   errorForSignerError(error),
+                                   messageForNSError(error));
+        }
         return copyData(wallet, signature, out_signature, inout_signature_len);
     }
 }
@@ -338,7 +442,11 @@ int macwlt_export_pubkey(macwlt_wallet_t *wallet,
                                                                          chainCode:chainCode
                                                                     derivationPath:path
                                                                              error:&error];
-        if (!publicKey) return failWith(wallet, errorForPublicDerivationError(error));
+        if (!publicKey) {
+            return failWithMessage(wallet,
+                                   errorForPublicDerivationError(error),
+                                   messageForNSError(error));
+        }
     }
 
     if (publicKey.length != kCompressedSecp256k1PublicKeyLength) {
@@ -387,7 +495,11 @@ int macwlt_export_address(macwlt_wallet_t *wallet,
                                                               derivationPath:path
                                                                  addressType:walletAddressType(address_type)
                                                                        error:&error];
-        if (!address) return failWith(wallet, errorForAddressDerivationError(error));
+        if (!address) {
+            return failWithMessage(wallet,
+                                   errorForAddressDerivationError(error),
+                                   messageForNSError(error));
+        }
     }
 
     if (!address) return failWith(wallet, MACWLT_ERR_INTERNAL);

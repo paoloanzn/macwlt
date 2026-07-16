@@ -42,6 +42,8 @@ int macwlt_wallet_create(macwlt_wallet_t **out_wallet);
 void macwlt_wallet_free(macwlt_wallet_t *wallet);
 
 macwlt_err_t macwlt_last_error(macwlt_wallet_t *wallet);
+const char *macwlt_last_error_message(macwlt_wallet_t *wallet);
+int macwlt_reset_wallet(macwlt_wallet_t *wallet);
 
 int macwlt_bootstrap_wallet(macwlt_wallet_t *wallet,
                             uint8_t *out_joint_pubkey,

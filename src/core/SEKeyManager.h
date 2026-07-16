@@ -21,6 +21,7 @@ typedef NS_ENUM(NSInteger, SEKeyPurpose) {
 + (SecKeyRef _Nullable)copyKeyWithError:(NSError * _Nullable * _Nullable)outError CF_RETURNS_RETAINED;
 + (SecKeyRef _Nullable)copyKeyForPurpose:(SEKeyPurpose)purpose
                                    error:(NSError * _Nullable * _Nullable)outError CF_RETURNS_RETAINED;
++ (BOOL)deleteAllManagedKeysWithError:(NSError * _Nullable * _Nullable)outError;
 
 - (instancetype)init NS_UNAVAILABLE;
 + (instancetype)new NS_UNAVAILABLE;
