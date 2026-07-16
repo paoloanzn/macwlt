@@ -9,6 +9,7 @@
 #import "Address.h"
 #import "WalletAddressDerivation.h"
 #import "WalletPublicKeyDerivation.h"
+#import "WalletSigner.h"
 #import "WalletShareEnvelope.h"
 
 #import <Foundation/Foundation.h>
@@ -104,6 +105,42 @@ static macwlt_err_t errorForAddressDerivationError(NSError *error) {
     }
     NSCAssert(NO, @"Unhandled address derivation error code");
     return MACWLT_ERR_INTERNAL;
+}
+
+static macwlt_err_t errorForSignerError(NSError *error) {
+    if (![error.domain isEqualToString:WalletSignerErrorDomain]) {
+        return MACWLT_ERR_INTERNAL;
+    }
+
+    switch (error.code) {
+        case WalletSignerErrorInvalidInput:
+            return MACWLT_ERR_INVALID_ARGUMENT;
+        case WalletSignerErrorUnavailable:
+            return MACWLT_ERR_UNAVAILABLE;
+        case WalletSignerErrorUnsupported:
+            return MACWLT_ERR_UNSUPPORTED;
+        case WalletSignerErrorSigningFailed:
+            return MACWLT_ERR_SIGNING_FAILED;
+        case WalletSignerErrorInternal:
+            return MACWLT_ERR_INTERNAL;
+    }
+    NSCAssert(NO, @"Unhandled signer error code");
+    return MACWLT_ERR_INTERNAL;
+}
+
+static int copyData(macwlt_wallet_t *wallet,
+                    NSData *data,
+                    uint8_t *out_data,
+                    size_t *inout_data_len) {
+    if (*inout_data_len < data.length) {
+        *inout_data_len = data.length;
+        return failWith(wallet, MACWLT_ERR_BUFFER_TOO_SMALL);
+    }
+    if (!out_data) return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
+
+    memcpy(out_data, data.bytes, data.length);
+    *inout_data_len = data.length;
+    return succeed(wallet);
 }
 
 static BOOL addressTypeIsSupported(macwlt_address_type_t address_type) {
@@ -223,11 +260,21 @@ int macwlt_sign_psbt(macwlt_wallet_t *wallet,
                      size_t psbt_len,
                      uint8_t *out_signed_psbt,
                      size_t *inout_signed_psbt_len) {
-    (void)psbt;
-    (void)psbt_len;
-    (void)out_signed_psbt;
-    (void)inout_signed_psbt_len;
-    return failWith(wallet, wallet ? MACWLT_ERR_UNSUPPORTED : MACWLT_ERR_INVALID_ARGUMENT);
+    if (!wallet || !psbt || psbt_len == 0 || !inout_signed_psbt_len) {
+        return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
+    }
+    WalletShareEnvelope *shareEnvelope = currentShareEnvelope(wallet);
+    if (!shareEnvelope) return failWith(wallet, MACWLT_ERR_UNAVAILABLE);
+
+    @autoreleasepool {
+        NSError *error = nil;
+        NSData *signedPSBT =
+            [WalletSigner signedPSBTForData:[NSData dataWithBytes:psbt length:psbt_len]
+                              shareEnvelope:shareEnvelope
+                                      error:&error];
+        if (!signedPSBT) return failWith(wallet, errorForSignerError(error));
+        return copyData(wallet, signedPSBT, out_signed_psbt, inout_signed_psbt_len);
+    }
 }
 
 int macwlt_sign_eth_tx(macwlt_wallet_t *wallet,
@@ -235,11 +282,22 @@ int macwlt_sign_eth_tx(macwlt_wallet_t *wallet,
                        size_t transaction_len,
                        uint8_t *out_signature,
                        size_t *inout_signature_len) {
-    (void)transaction;
-    (void)transaction_len;
-    (void)out_signature;
-    (void)inout_signature_len;
-    return failWith(wallet, wallet ? MACWLT_ERR_UNSUPPORTED : MACWLT_ERR_INVALID_ARGUMENT);
+    if (!wallet || !transaction || transaction_len == 0 || !inout_signature_len) {
+        return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
+    }
+    WalletShareEnvelope *shareEnvelope = currentShareEnvelope(wallet);
+    if (!shareEnvelope) return failWith(wallet, MACWLT_ERR_UNAVAILABLE);
+
+    @autoreleasepool {
+        NSError *error = nil;
+        NSData *signature =
+            [WalletSigner ethereumSignatureForTransaction:[NSData dataWithBytes:transaction
+                                                                         length:transaction_len]
+                                           shareEnvelope:shareEnvelope
+                                                   error:&error];
+        if (!signature) return failWith(wallet, errorForSignerError(error));
+        return copyData(wallet, signature, out_signature, inout_signature_len);
+    }
 }
 
 int macwlt_export_pubkey(macwlt_wallet_t *wallet,

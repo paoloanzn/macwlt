@@ -17,6 +17,7 @@
 #import "../src/core/SigningShareSet.h"
 #import "../src/core/WalletAddressDerivation.h"
 #import "../src/core/WalletPublicKeyDerivation.h"
+#import "../src/core/WalletSigner.h"
 #import "../src/core/WalletShareEnvelope.h"
 #import "../src/core/hex.h"
 
@@ -29,6 +30,7 @@
 #include <wally_bip32.h>
 #include <wally_bip39.h>
 #include <wally_core.h>
+#include <wally_crypto.h>
 
 static void fail(NSString *message) {
     NSLog(@"%@", message);
@@ -79,6 +81,24 @@ static NSData *compressedPublicKeyForSecret(NSData *secret) {
     expect(compressedLength == sizeof(compressed),
            @"unexpected compressed public key length");
     return [NSData dataWithBytes:compressed length:sizeof(compressed)];
+}
+
+static NSData *privateKeyByMultiplying(NSData *a, NSData *b) {
+    NSMutableData *out = [NSMutableData dataWithLength:32];
+    expect(wally_ec_scalar_multiply(a.bytes, a.length,
+                                    b.bytes, b.length,
+                                    out.mutableBytes, out.length) == WALLY_OK,
+           @"test scalar multiply failed");
+    return out;
+}
+
+static NSData *privateKeyByAdding(NSData *a, NSData *b) {
+    NSMutableData *out = [NSMutableData dataWithLength:32];
+    expect(wally_ec_scalar_add(a.bytes, a.length,
+                               b.bytes, b.length,
+                               out.mutableBytes, out.length) == WALLY_OK,
+           @"test scalar add failed");
+    return out;
 }
 
 static NSURL *temporaryTestFileURL(NSString *name) {
@@ -451,6 +471,40 @@ static void testSigningShareSetGeneratedCommutative(void) {
            @"multiplicative share public key should be commutative");
 }
 
+static void testWalletSignerSignsWithSplitShares(void) {
+    NSData *shareA = scalarData(2);
+    NSData *shareB = scalarData(3);
+    NSData *tweak = scalarData(5);
+    NSData *digest = dataFromHex(@"0102030405060708090a0b0c0d0e0f10"
+                                 @"1112131415161718191a1b1c1d1e1f20");
+    NSData *parentKey = privateKeyByMultiplying(shareA, shareB);
+    NSData *childKey = privateKeyByAdding(parentKey, tweak);
+    NSData *publicKey = compressedPublicKeyForSecret(childKey);
+
+    NSError *error = nil;
+    WalletECDSASignature *signature = [WalletSigner signatureForDigest:digest
+                                                                 shareA:shareA
+                                                                 shareB:shareB
+                                                                  tweak:tweak
+                                                                  error:&error];
+    expect(signature != nil,
+           [NSString stringWithFormat:@"split signer failed: %@", error]);
+    expect(signature.compactSignature.length == 64,
+           @"split signer returned wrong compact signature length");
+    expect(signature.derSignature.length > 0,
+           @"split signer returned empty DER signature");
+    expect((signature.recoveryID & ~3) == 0,
+           @"split signer returned invalid recovery id");
+    expect(wally_ec_sig_verify(publicKey.bytes,
+                               publicKey.length,
+                               digest.bytes,
+                               digest.length,
+                               EC_FLAG_ECDSA,
+                               signature.compactSignature.bytes,
+                               signature.compactSignature.length) == WALLY_OK,
+           @"split signer signature did not verify against equivalent public key");
+}
+
 static void testWalletPublicKeyDerivationMatchesWally(void) {
     NSData *seed = dataFromHex(@"000102030405060708090a0b0c0d0e0f");
 
@@ -699,8 +753,8 @@ static void testSigningServiceUnsupportedSigning(void) {
     expect(psbtReplied, @"PSBT signing did not reply synchronously");
     expect([psbtError.domain isEqualToString:SigningServiceErrorDomain],
            @"unsupported PSBT signing returned wrong error domain");
-    expect(psbtError.code == MACWLT_ERR_UNSUPPORTED,
-           @"unsupported PSBT signing returned wrong error code");
+    expect(psbtError.code == MACWLT_ERR_UNAVAILABLE,
+           @"PSBT signing before bootstrap returned wrong error code");
 
     __block NSError *ethError = nil;
     __block BOOL ethReplied = NO;
@@ -713,8 +767,8 @@ static void testSigningServiceUnsupportedSigning(void) {
     expect(ethReplied, @"ETH signing did not reply synchronously");
     expect([ethError.domain isEqualToString:SigningServiceErrorDomain],
            @"unsupported ETH signing returned wrong error domain");
-    expect(ethError.code == MACWLT_ERR_UNSUPPORTED,
-           @"unsupported ETH signing returned wrong error code");
+    expect(ethError.code == MACWLT_ERR_UNAVAILABLE,
+           @"ETH signing before bootstrap returned wrong error code");
 }
 
 static void testSigningServicePubkeyErrors(void) {
@@ -797,14 +851,14 @@ static void testMacwltCABIUnsupportedOperations(void) {
     uint8_t oneByte = 0;
     size_t oneByteLength = sizeof(oneByte);
     expect(macwlt_sign_psbt(wallet, &oneByte, sizeof(oneByte), &oneByte, &oneByteLength) == MACWLT_FAILURE,
-           @"macwlt_sign_psbt unexpectedly succeeded before signer implementation");
-    expect(macwlt_last_error(wallet) == MACWLT_ERR_UNSUPPORTED,
-           @"macwlt_sign_psbt should report unsupported");
+           @"macwlt_sign_psbt unexpectedly succeeded before bootstrap");
+    expect(macwlt_last_error(wallet) == MACWLT_ERR_UNAVAILABLE,
+           @"macwlt_sign_psbt should report unavailable before bootstrap");
 
     expect(macwlt_sign_eth_tx(wallet, &oneByte, sizeof(oneByte), &oneByte, &oneByteLength) == MACWLT_FAILURE,
-           @"macwlt_sign_eth_tx unexpectedly succeeded before signer implementation");
-    expect(macwlt_last_error(wallet) == MACWLT_ERR_UNSUPPORTED,
-           @"macwlt_sign_eth_tx should report unsupported");
+           @"macwlt_sign_eth_tx unexpectedly succeeded before bootstrap");
+    expect(macwlt_last_error(wallet) == MACWLT_ERR_UNAVAILABLE,
+           @"macwlt_sign_eth_tx should report unavailable before bootstrap");
 
     expect(macwlt_export_pubkey(wallet, "m/84h/0h/0h/0/0", &oneByte, &oneByteLength) == MACWLT_FAILURE,
            @"macwlt_export_pubkey unexpectedly accepted child derivation before derivation implementation");
@@ -889,6 +943,7 @@ int main(void) {
         testSigningShareSetKnownPublicKey();
         testSigningShareSetRejectsInvalidShare();
         testSigningShareSetGeneratedCommutative();
+        testWalletSignerSignsWithSplitShares();
         testWalletPublicKeyDerivationMatchesWally();
         testWalletPublicKeyDerivationRejectsHardenedPath();
         testWalletAddressDerivationMatchesAddressHelpers();
