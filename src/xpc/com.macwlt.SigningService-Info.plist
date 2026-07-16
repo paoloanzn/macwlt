@@ -21,6 +21,8 @@
     <string>1</string>
     <key>XPCService</key>
     <dict>
+        <key>JoinExistingSession</key>
+        <false/>
         <key>ServiceType</key>
         <string>Application</string>
     </dict>

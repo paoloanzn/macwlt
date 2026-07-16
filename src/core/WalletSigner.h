@@ -6,6 +6,8 @@
 
 #import <Foundation/Foundation.h>
 
+#import "WalletSigningEngine.h"
+
 @class WalletShareEnvelope;
 
 NS_ASSUME_NONNULL_BEGIN
@@ -35,7 +37,9 @@ typedef NS_ENUM(NSInteger, WalletSignerErrorCode) {
 
 @end
 
-@interface WalletSigner : NSObject
+@interface WalletSigner : NSObject <WalletSigningEngine>
+
+- (instancetype)init NS_DESIGNATED_INITIALIZER;
 
 + (nullable WalletECDSASignature *)signatureForDigest:(NSData *)digest32
                                                shareA:(NSData *)shareA
@@ -55,9 +59,6 @@ typedef NS_ENUM(NSInteger, WalletSignerErrorCode) {
 + (nullable NSData *)signedPSBTForData:(NSData *)psbtData
                          shareEnvelope:(WalletShareEnvelope *)shareEnvelope
                                  error:(NSError * _Nullable * _Nullable)outError;
-
-- (instancetype)init NS_UNAVAILABLE;
-+ (instancetype)new NS_UNAVAILABLE;
 
 @end
 

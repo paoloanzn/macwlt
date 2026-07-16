@@ -8,8 +8,6 @@
 
 #import "Address.h"
 #import "SEKeyManager.h"
-#import "WalletAddressDerivation.h"
-#import "WalletPublicKeyDerivation.h"
 #import "WalletSigner.h"
 #import "WalletShareEnvelope.h"
 
@@ -21,7 +19,7 @@
 struct macwlt_wallet {
     macwlt_err_t last_error;
     char *last_error_message;
-    void *share_envelope;
+    void *signing_engine;
 };
 
 static const size_t kCompressedSecp256k1PublicKeyLength = 33;
@@ -92,29 +90,25 @@ static int succeed(macwlt_wallet_t *wallet) {
     return MACWLT_SUCCESS;
 }
 
-static void storeShareEnvelope(macwlt_wallet_t *wallet, WalletShareEnvelope *shareEnvelope) {
-    if (wallet->share_envelope) (void)CFBridgingRelease(wallet->share_envelope);
-    wallet->share_envelope = (__bridge_retained void *)shareEnvelope;
+static void storeSigningEngine(macwlt_wallet_t *wallet, id<WalletSigningEngine> signingEngine) {
+    if (wallet->signing_engine) (void)CFBridgingRelease(wallet->signing_engine);
+    wallet->signing_engine = (__bridge_retained void *)signingEngine;
 }
 
-static WalletShareEnvelope *currentShareEnvelope(macwlt_wallet_t *wallet) {
-    return wallet && wallet->share_envelope
-        ? (__bridge WalletShareEnvelope *)wallet->share_envelope
+static id<WalletSigningEngine> currentSigningEngine(macwlt_wallet_t *wallet) {
+    return wallet && wallet->signing_engine
+        ? (__bridge id<WalletSigningEngine>)wallet->signing_engine
         : nil;
 }
 
-static void clearShareEnvelope(macwlt_wallet_t *wallet) {
-    if (!wallet || !wallet->share_envelope) return;
-    (void)CFBridgingRelease(wallet->share_envelope);
-    wallet->share_envelope = NULL;
-}
-
-static BOOL derivationPathIsRoot(const char *derivation_path) {
-    return derivation_path && strcmp(derivation_path, "m") == 0;
+static void clearSigningEngine(macwlt_wallet_t *wallet) {
+    if (!wallet || !wallet->signing_engine) return;
+    (void)CFBridgingRelease(wallet->signing_engine);
+    wallet->signing_engine = NULL;
 }
 
 static BOOL derivationPathStartsAtRoot(const char *derivation_path) {
-    return derivationPathIsRoot(derivation_path) ||
+    return (derivation_path && strcmp(derivation_path, "m") == 0) ||
         (derivation_path && strncmp(derivation_path, "m/", 2) == 0);
 }
 
@@ -131,44 +125,6 @@ static BOOL derivationPathContainsHardenedComponent(const char *derivation_path)
             componentStart = p + 1;
         }
     }
-}
-
-static macwlt_err_t errorForPublicDerivationError(NSError *error) {
-    if (![error.domain isEqualToString:WalletPublicKeyDerivationErrorDomain]) {
-        return MACWLT_ERR_INTERNAL;
-    }
-
-    switch (error.code) {
-        case WalletPublicKeyDerivationErrorInvalidRootPublicKey:
-        case WalletPublicKeyDerivationErrorInvalidChainCode:
-        case WalletPublicKeyDerivationErrorInvalidPath:
-            return MACWLT_ERR_INVALID_ARGUMENT;
-        case WalletPublicKeyDerivationErrorUnsupportedHardenedPath:
-            return MACWLT_ERR_UNSUPPORTED;
-        case WalletPublicKeyDerivationErrorDerivationFailed:
-        case WalletPublicKeyDerivationErrorRandomFailed:
-            return MACWLT_ERR_INTERNAL;
-    }
-    NSCAssert(NO, @"Unhandled public derivation error code");
-    return MACWLT_ERR_INTERNAL;
-}
-
-static macwlt_err_t errorForAddressDerivationError(NSError *error) {
-    if ([error.domain isEqualToString:WalletPublicKeyDerivationErrorDomain]) {
-        return errorForPublicDerivationError(error);
-    }
-    if (![error.domain isEqualToString:WalletAddressDerivationErrorDomain]) {
-        return MACWLT_ERR_INTERNAL;
-    }
-
-    switch (error.code) {
-        case WalletAddressDerivationErrorUnsupportedAddressType:
-            return MACWLT_ERR_UNSUPPORTED;
-        case WalletAddressDerivationErrorAddressEncodingFailed:
-            return MACWLT_ERR_INTERNAL;
-    }
-    NSCAssert(NO, @"Unhandled address derivation error code");
-    return MACWLT_ERR_INTERNAL;
 }
 
 static macwlt_err_t errorForSignerError(NSError *error) {
@@ -217,19 +173,6 @@ static BOOL addressTypeIsSupported(macwlt_address_type_t address_type) {
     return NO;
 }
 
-static WalletAddressType walletAddressType(macwlt_address_type_t address_type) {
-    switch (address_type) {
-        case MACWLT_ADDRESS_BITCOIN_P2WPKH_MAINNET:
-            return WalletAddressTypeBitcoinP2WPKHMainnet;
-        case MACWLT_ADDRESS_BITCOIN_P2WPKH_TESTNET:
-            return WalletAddressTypeBitcoinP2WPKHTestnet;
-        case MACWLT_ADDRESS_ETHEREUM:
-            return WalletAddressTypeEthereum;
-    }
-    NSCAssert(NO, @"Unhandled C wallet address type");
-    return WalletAddressTypeBitcoinP2WPKHMainnet;
-}
-
 static NSString *addressForPublicKey(NSData *publicKey,
                                      macwlt_address_type_t address_type) {
     switch (address_type) {
@@ -270,15 +213,22 @@ int macwlt_wallet_create(macwlt_wallet_t **out_wallet) {
     macwlt_wallet_t *wallet = calloc(1, sizeof(*wallet));
     if (!wallet) return MACWLT_FAILURE;
 
+    WalletSigner *signingEngine = [[WalletSigner alloc] init];
+    if (!signingEngine) {
+        free(wallet);
+        return MACWLT_FAILURE;
+    }
+
     wallet->last_error = MACWLT_OK;
     setLastErrorMessage(wallet, defaultMessageForError(MACWLT_OK));
+    wallet->signing_engine = (__bridge_retained void *)signingEngine;
     *out_wallet = wallet;
     return MACWLT_SUCCESS;
 }
 
 void macwlt_wallet_free(macwlt_wallet_t *wallet) {
     if (!wallet) return;
-    clearShareEnvelope(wallet);
+    clearSigningEngine(wallet);
     free(wallet->last_error_message);
     free(wallet);
 }
@@ -295,9 +245,11 @@ const char *macwlt_last_error_message(macwlt_wallet_t *wallet) {
 int macwlt_reset_wallet(macwlt_wallet_t *wallet) {
     if (!wallet) return MACWLT_FAILURE;
 
-    clearShareEnvelope(wallet);
-
     @autoreleasepool {
+        WalletSigner *signingEngine = [[WalletSigner alloc] init];
+        if (!signingEngine) return failWith(wallet, MACWLT_ERR_INTERNAL);
+        storeSigningEngine(wallet, signingEngine);
+
         NSError *error = nil;
         NSURL *storageURL = [WalletShareEnvelope defaultStorageURL];
         if ([[NSFileManager defaultManager] fileExistsAtPath:storageURL.path] &&
@@ -331,22 +283,25 @@ int macwlt_bootstrap_wallet(macwlt_wallet_t *wallet,
 
     @autoreleasepool {
         NSError *error = nil;
-        WalletShareEnvelope *shareEnvelope =
-            [WalletShareEnvelope loadOrBootstrapFromDefaultStorageWithError:&error];
-        if (!shareEnvelope) {
+        id<WalletSigningEngine> signingEngine = currentSigningEngine(wallet);
+        if (!signingEngine) return failWith(wallet, MACWLT_ERR_INTERNAL);
+
+        NSData *jointPublicKey = [signingEngine bootstrapWithError:&error];
+        if (!jointPublicKey) {
+            macwlt_err_t walletError = [error.domain isEqualToString:WalletSignerErrorDomain]
+                ? errorForSignerError(error)
+                : MACWLT_ERR_UNAVAILABLE;
             return failWithMessage(wallet,
-                                   MACWLT_ERR_UNAVAILABLE,
+                                   walletError,
                                    messageForNSError(error));
         }
 
-        NSData *jointPublicKey = shareEnvelope.jointCompressedPublicKey;
         if (jointPublicKey.length != kCompressedSecp256k1PublicKeyLength) {
             return failWith(wallet, MACWLT_ERR_INTERNAL);
         }
 
         memcpy(out_joint_pubkey, jointPublicKey.bytes, jointPublicKey.length);
         *inout_joint_pubkey_len = jointPublicKey.length;
-        storeShareEnvelope(wallet, shareEnvelope);
         return succeed(wallet);
     }
 }
@@ -359,15 +314,14 @@ int macwlt_sign_psbt(macwlt_wallet_t *wallet,
     if (!wallet || !psbt || psbt_len == 0 || !inout_signed_psbt_len) {
         return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
     }
-    WalletShareEnvelope *shareEnvelope = currentShareEnvelope(wallet);
-    if (!shareEnvelope) return failWith(wallet, MACWLT_ERR_UNAVAILABLE);
+    id<WalletSigningEngine> signingEngine = currentSigningEngine(wallet);
+    if (!signingEngine) return failWith(wallet, MACWLT_ERR_INTERNAL);
 
     @autoreleasepool {
         NSError *error = nil;
         NSData *signedPSBT =
-            [WalletSigner signedPSBTForData:[NSData dataWithBytes:psbt length:psbt_len]
-                              shareEnvelope:shareEnvelope
-                                      error:&error];
+            [signingEngine signedPSBTForData:[NSData dataWithBytes:psbt length:psbt_len]
+                                        error:&error];
         if (!signedPSBT) {
             return failWithMessage(wallet,
                                    errorForSignerError(error),
@@ -385,16 +339,15 @@ int macwlt_sign_eth_tx(macwlt_wallet_t *wallet,
     if (!wallet || !transaction || transaction_len == 0 || !inout_signature_len) {
         return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
     }
-    WalletShareEnvelope *shareEnvelope = currentShareEnvelope(wallet);
-    if (!shareEnvelope) return failWith(wallet, MACWLT_ERR_UNAVAILABLE);
+    id<WalletSigningEngine> signingEngine = currentSigningEngine(wallet);
+    if (!signingEngine) return failWith(wallet, MACWLT_ERR_INTERNAL);
 
     @autoreleasepool {
         NSError *error = nil;
         NSData *signature =
-            [WalletSigner ethereumSignatureForTransaction:[NSData dataWithBytes:transaction
-                                                                         length:transaction_len]
-                                           shareEnvelope:shareEnvelope
-                                                   error:&error];
+            [signingEngine ethereumSignatureForTransaction:[NSData dataWithBytes:transaction
+                                                                          length:transaction_len]
+                                                     error:&error];
         if (!signature) {
             return failWithMessage(wallet,
                                    errorForSignerError(error),
@@ -424,29 +377,18 @@ int macwlt_export_pubkey(macwlt_wallet_t *wallet,
     }
     if (!out_pubkey) return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
 
-    WalletShareEnvelope *shareEnvelope = currentShareEnvelope(wallet);
-    if (!shareEnvelope) return failWith(wallet, MACWLT_ERR_UNAVAILABLE);
+    id<WalletSigningEngine> signingEngine = currentSigningEngine(wallet);
+    if (!signingEngine) return failWith(wallet, MACWLT_ERR_INTERNAL);
 
-    NSData *publicKey = nil;
-    if (derivationPathIsRoot(derivation_path)) {
-        publicKey = shareEnvelope.jointCompressedPublicKey;
-    } else {
-        NSData *chainCode = shareEnvelope.chainCode;
-        if (!chainCode) return failWith(wallet, MACWLT_ERR_UNAVAILABLE);
+    NSString *path = [NSString stringWithUTF8String:derivation_path];
+    if (!path) return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
 
-        NSString *path = [NSString stringWithUTF8String:derivation_path];
-        if (!path) return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
-
-        NSError *error = nil;
-        publicKey = [WalletPublicKeyDerivation publicKeyForRootCompressedPublicKey:shareEnvelope.jointCompressedPublicKey
-                                                                         chainCode:chainCode
-                                                                    derivationPath:path
-                                                                             error:&error];
-        if (!publicKey) {
-            return failWithMessage(wallet,
-                                   errorForPublicDerivationError(error),
-                                   messageForNSError(error));
-        }
+    NSError *error = nil;
+    NSData *publicKey = [signingEngine publicKeyForDerivationPath:path error:&error];
+    if (!publicKey) {
+        return failWithMessage(wallet,
+                               errorForSignerError(error),
+                               messageForNSError(error));
     }
 
     if (publicKey.length != kCompressedSecp256k1PublicKeyLength) {
@@ -476,31 +418,21 @@ int macwlt_export_address(macwlt_wallet_t *wallet,
         return failWith(wallet, MACWLT_ERR_UNSUPPORTED);
     }
 
-    WalletShareEnvelope *shareEnvelope = currentShareEnvelope(wallet);
-    if (!shareEnvelope) return failWith(wallet, MACWLT_ERR_UNAVAILABLE);
+    id<WalletSigningEngine> signingEngine = currentSigningEngine(wallet);
+    if (!signingEngine) return failWith(wallet, MACWLT_ERR_INTERNAL);
 
-    NSString *address = nil;
-    if (derivationPathIsRoot(derivation_path)) {
-        address = addressForPublicKey(shareEnvelope.jointCompressedPublicKey, address_type);
-    } else {
-        NSData *chainCode = shareEnvelope.chainCode;
-        if (!chainCode) return failWith(wallet, MACWLT_ERR_UNAVAILABLE);
+    NSString *path = [NSString stringWithUTF8String:derivation_path];
+    if (!path) return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
 
-        NSString *path = [NSString stringWithUTF8String:derivation_path];
-        if (!path) return failWith(wallet, MACWLT_ERR_INVALID_ARGUMENT);
-
-        NSError *error = nil;
-        address = [WalletAddressDerivation addressForRootCompressedPublicKey:shareEnvelope.jointCompressedPublicKey
-                                                                   chainCode:chainCode
-                                                              derivationPath:path
-                                                                 addressType:walletAddressType(address_type)
-                                                                       error:&error];
-        if (!address) {
-            return failWithMessage(wallet,
-                                   errorForAddressDerivationError(error),
-                                   messageForNSError(error));
-        }
+    NSError *error = nil;
+    NSData *publicKey = [signingEngine publicKeyForDerivationPath:path error:&error];
+    if (!publicKey) {
+        return failWithMessage(wallet,
+                               errorForSignerError(error),
+                               messageForNSError(error));
     }
+
+    NSString *address = addressForPublicKey(publicKey, address_type);
 
     if (!address) return failWith(wallet, MACWLT_ERR_INTERNAL);
     return copyAddressString(wallet, address, out_address, inout_address_len);

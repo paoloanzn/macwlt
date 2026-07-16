@@ -113,7 +113,16 @@ static void setShareWindowError(NSError **outError,
         return NO;
     }
 
-    if (!loader(buffer, outError)) return NO;
+    BOOL loaded = loader(buffer, outError);
+    if (!loaded) {
+        if (buffer.state == HardenedBufferStateUnmasked) {
+            [buffer wipeAndMaskWithError:NULL];
+        }
+        if (otherBuffer.state == HardenedBufferStateUnmasked) {
+            [otherBuffer wipeAndMaskWithError:NULL];
+        }
+        return NO;
+    }
 
     if (otherBuffer.state != HardenedBufferStateMasked) {
         [buffer wipeAndMaskWithError:NULL];

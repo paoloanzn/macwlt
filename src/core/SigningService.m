@@ -6,14 +6,13 @@
 
 #import "SigningService.h"
 
+#import "Address.h"
+#import "WalletSigner.h"
+#import "WalletSigningEngine.h"
+
 #include "macwlt.h"
 
 NSString * const SigningServiceErrorDomain = @"macwlt.SigningService";
-
-typedef int (^SigningServiceCallBlock)(uint8_t * _Nullable output,
-                                       size_t *inoutOutputLength);
-typedef int (^SigningServiceStringCallBlock)(char * _Nullable output,
-                                             size_t *inoutOutputLength);
 
 static NSString *messageForMacwltError(macwlt_err_t error) {
     switch (error) {
@@ -48,90 +47,135 @@ static NSError *signingServiceError(macwlt_err_t error) {
                            userInfo:@{NSLocalizedDescriptionKey: messageForMacwltError(error)}];
 }
 
+static NSString *messageForNSError(NSError *error) {
+    if (!error) return nil;
+    NSString *description = error.localizedDescription;
+    if (description.length > 0) return description;
+    return [NSString stringWithFormat:@"%@ (%ld)", error.domain, (long)error.code];
+}
+
+static NSError *signingServiceErrorWithMessage(macwlt_err_t error, NSString *message) {
+    NSString *description = message.length > 0 ? message : messageForMacwltError(error);
+    return [NSError errorWithDomain:SigningServiceErrorDomain
+                               code:error
+                           userInfo:@{NSLocalizedDescriptionKey: description}];
+}
+
+static macwlt_err_t errorForSignerError(NSError *error) {
+    if (![error.domain isEqualToString:WalletSignerErrorDomain]) {
+        return MACWLT_ERR_INTERNAL;
+    }
+
+    switch (error.code) {
+        case WalletSignerErrorInvalidInput:
+            return MACWLT_ERR_INVALID_ARGUMENT;
+        case WalletSignerErrorUnavailable:
+            return MACWLT_ERR_UNAVAILABLE;
+        case WalletSignerErrorUnsupported:
+            return MACWLT_ERR_UNSUPPORTED;
+        case WalletSignerErrorSigningFailed:
+            return MACWLT_ERR_SIGNING_FAILED;
+        case WalletSignerErrorInternal:
+            return MACWLT_ERR_INTERNAL;
+    }
+    NSCAssert(NO, @"Unhandled signer error code");
+    return MACWLT_ERR_INTERNAL;
+}
+
+static NSError *signingServiceErrorForSignerError(NSError *error) {
+    macwlt_err_t serviceError = errorForSignerError(error);
+    return signingServiceErrorWithMessage(serviceError, messageForNSError(error));
+}
+
+static BOOL signingServiceAddressTypeIsSupported(SigningServiceAddressType addressType) {
+    switch (addressType) {
+        case SigningServiceAddressTypeBitcoinP2WPKHMainnet:
+        case SigningServiceAddressTypeBitcoinP2WPKHTestnet:
+        case SigningServiceAddressTypeEthereum:
+            return YES;
+    }
+    return NO;
+}
+
+static NSString *signingServiceAddressForPublicKey(NSData *publicKey,
+                                                   SigningServiceAddressType addressType) {
+    switch (addressType) {
+        case SigningServiceAddressTypeBitcoinP2WPKHMainnet:
+            return p2wpkhAddress(publicKey, YES);
+        case SigningServiceAddressTypeBitcoinP2WPKHTestnet:
+            return p2wpkhAddress(publicKey, NO);
+        case SigningServiceAddressTypeEthereum:
+            return ethereumAddress(publicKey);
+    }
+    NSCAssert(NO, @"Unhandled signing service address type");
+    return nil;
+}
+
 @implementation SigningService {
-    macwlt_wallet_t *_wallet;
+    id<WalletSigningEngine> _signingEngine;
 }
 
 - (nullable instancetype)initWithError:(NSError **)outError {
-    macwlt_wallet_t *wallet = NULL;
-    if (macwlt_wallet_create(&wallet) != MACWLT_SUCCESS || !wallet) {
-        if (outError) *outError = signingServiceError(MACWLT_ERR_INTERNAL);
-        return nil;
-    }
+    (void)outError;
 
     self = [super init];
     if (self) {
-        _wallet = wallet;
-    } else {
-        macwlt_wallet_free(wallet);
+        _signingEngine = [[WalletSigner alloc] init];
     }
     return self;
-}
-
-- (void)dealloc {
-    macwlt_wallet_free(_wallet);
-}
-
-- (NSError *)lastError {
-    return signingServiceError(macwlt_last_error(_wallet));
 }
 
 - (void)bootstrapWalletWithReply:(SigningServiceBootstrapReply)reply {
     NSParameterAssert(reply);
 
-    uint8_t publicKey[33];
-    size_t publicKeyLength = sizeof(publicKey);
-    int status = macwlt_bootstrap_wallet(_wallet, publicKey, &publicKeyLength);
-    if (status != MACWLT_SUCCESS) {
-        reply(nil, [self lastError]);
+    NSError *error = nil;
+    NSData *publicKey = [_signingEngine bootstrapWithError:&error];
+    if (!publicKey) {
+        reply(nil, signingServiceErrorWithMessage(MACWLT_ERR_UNAVAILABLE,
+                                                  messageForNSError(error)));
         return;
     }
 
-    reply([NSData dataWithBytes:publicKey length:publicKeyLength], nil);
+    reply(publicKey, nil);
 }
 
 - (void)signPSBT:(NSData *)psbt withReply:(SigningServicePSBTReply)reply {
     NSParameterAssert(reply);
-    [self dataFromDynamicCall:^int(uint8_t *output, size_t *inoutOutputLength) {
-        return macwlt_sign_psbt(_wallet,
-                                psbt.bytes,
-                                psbt.length,
-                                output,
-                                inoutOutputLength);
-    } reply:reply];
+
+    NSError *error = nil;
+    NSData *signedPSBT = [_signingEngine signedPSBTForData:psbt error:&error];
+    if (!signedPSBT) {
+        reply(nil, signingServiceErrorForSignerError(error));
+        return;
+    }
+    reply(signedPSBT, nil);
 }
 
 - (void)signEthTx:(NSData *)transaction withReply:(SigningServiceSignatureReply)reply {
     NSParameterAssert(reply);
-    [self dataFromDynamicCall:^int(uint8_t *output, size_t *inoutOutputLength) {
-        return macwlt_sign_eth_tx(_wallet,
-                                  transaction.bytes,
-                                  transaction.length,
-                                  output,
-                                  inoutOutputLength);
-    } reply:reply];
+
+    NSError *error = nil;
+    NSData *signature = [_signingEngine ethereumSignatureForTransaction:transaction
+                                                                  error:&error];
+    if (!signature) {
+        reply(nil, signingServiceErrorForSignerError(error));
+        return;
+    }
+    reply(signature, nil);
 }
 
 - (void)exportPubkeyForDerivationPath:(NSString *)derivationPath
                             withReply:(SigningServicePubkeyReply)reply {
     NSParameterAssert(reply);
 
-    NSData *pathData = [derivationPath dataUsingEncoding:NSUTF8StringEncoding];
-    if (!pathData) {
-        reply(nil, signingServiceError(MACWLT_ERR_INVALID_ARGUMENT));
+    NSError *error = nil;
+    NSData *publicKey = [_signingEngine publicKeyForDerivationPath:derivationPath
+                                                             error:&error];
+    if (!publicKey) {
+        reply(nil, signingServiceErrorForSignerError(error));
         return;
     }
-
-    NSMutableData *nulTerminatedPath = [pathData mutableCopy];
-    uint8_t nul = 0;
-    [nulTerminatedPath appendBytes:&nul length:sizeof(nul)];
-
-    [self dataFromDynamicCall:^int(uint8_t *output, size_t *inoutOutputLength) {
-        return macwlt_export_pubkey(_wallet,
-                                    nulTerminatedPath.bytes,
-                                    output,
-                                    inoutOutputLength);
-    } reply:reply];
+    reply(publicKey, nil);
 }
 
 - (void)exportAddressForDerivationPath:(NSString *)derivationPath
@@ -139,97 +183,32 @@ static NSError *signingServiceError(macwlt_err_t error) {
                               withReply:(SigningServiceAddressReply)reply {
     NSParameterAssert(reply);
 
-    NSData *pathData = [derivationPath dataUsingEncoding:NSUTF8StringEncoding];
-    if (!pathData) {
-        reply(nil, signingServiceError(MACWLT_ERR_INVALID_ARGUMENT));
+    if (!signingServiceAddressTypeIsSupported(addressType)) {
+        reply(nil, signingServiceError(MACWLT_ERR_UNSUPPORTED));
         return;
     }
 
-    NSMutableData *nulTerminatedPath = [pathData mutableCopy];
-    uint8_t nul = 0;
-    [nulTerminatedPath appendBytes:&nul length:sizeof(nul)];
+    NSError *error = nil;
+    NSData *publicKey = [_signingEngine publicKeyForDerivationPath:derivationPath
+                                                             error:&error];
+    if (!publicKey) {
+        reply(nil, signingServiceErrorForSignerError(error));
+        return;
+    }
 
-    [self stringFromDynamicCall:^int(char *output, size_t *inoutOutputLength) {
-        return macwlt_export_address(_wallet,
-                                     nulTerminatedPath.bytes,
-                                     (macwlt_address_type_t)addressType,
-                                     output,
-                                     inoutOutputLength);
-    } reply:reply];
+    NSString *address = signingServiceAddressForPublicKey(publicKey, addressType);
+    if (!address) {
+        reply(nil, signingServiceError(MACWLT_ERR_INTERNAL));
+        return;
+    }
+    reply(address, nil);
 }
 
 - (void)exportAttestationForChallenge:(NSData *)challenge
                             withReply:(SigningServiceAttestationReply)reply {
     NSParameterAssert(reply);
-    [self dataFromDynamicCall:^int(uint8_t *output, size_t *inoutOutputLength) {
-        return macwlt_export_attestation(_wallet,
-                                         challenge.bytes,
-                                         challenge.length,
-                                         output,
-                                         inoutOutputLength);
-    } reply:reply];
-}
-
-- (void)dataFromDynamicCall:(SigningServiceCallBlock)call
-                     reply:(void (^)(NSData * _Nullable data, NSError * _Nullable error))reply {
-    NSParameterAssert(call);
-    NSParameterAssert(reply);
-
-    size_t outputLength = 0;
-    int status = call(NULL, &outputLength);
-    if (status == MACWLT_SUCCESS) {
-        reply([NSData data], nil);
-        return;
-    }
-
-    macwlt_err_t error = macwlt_last_error(_wallet);
-    if (error != MACWLT_ERR_BUFFER_TOO_SMALL) {
-        reply(nil, signingServiceError(error));
-        return;
-    }
-
-    NSMutableData *output = [NSMutableData dataWithLength:outputLength];
-    status = call(output.mutableBytes, &outputLength);
-    if (status != MACWLT_SUCCESS) {
-        reply(nil, [self lastError]);
-        return;
-    }
-
-    output.length = outputLength;
-    reply(output, nil);
-}
-
-- (void)stringFromDynamicCall:(SigningServiceStringCallBlock)call
-                        reply:(void (^)(NSString * _Nullable string, NSError * _Nullable error))reply {
-    NSParameterAssert(call);
-    NSParameterAssert(reply);
-
-    size_t outputLength = 0;
-    int status = call(NULL, &outputLength);
-    if (status == MACWLT_SUCCESS) {
-        reply(@"", nil);
-        return;
-    }
-
-    macwlt_err_t error = macwlt_last_error(_wallet);
-    if (error != MACWLT_ERR_BUFFER_TOO_SMALL) {
-        reply(nil, signingServiceError(error));
-        return;
-    }
-
-    NSMutableData *output = [NSMutableData dataWithLength:outputLength];
-    status = call(output.mutableBytes, &outputLength);
-    if (status != MACWLT_SUCCESS) {
-        reply(nil, [self lastError]);
-        return;
-    }
-
-    NSString *string = [NSString stringWithUTF8String:output.bytes];
-    if (!string) {
-        reply(nil, signingServiceError(MACWLT_ERR_INTERNAL));
-        return;
-    }
-    reply(string, nil);
+    (void)challenge;
+    reply(nil, signingServiceError(MACWLT_ERR_UNSUPPORTED));
 }
 
 @end

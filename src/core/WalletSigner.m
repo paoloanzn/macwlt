@@ -6,8 +6,9 @@
 
 #import "WalletSigner.h"
 
-#import "HardenedBuffer.h"
+#import "HardenedShareWindow.h"
 #import "SecureWipe.h"
+#import "WalletPublicKeyDerivation.h"
 #import "WalletShareEnvelope.h"
 
 #import <Security/Security.h>
@@ -55,6 +56,46 @@ static void setSignerError(NSError **outError,
                            WalletSignerErrorCode code,
                            NSString *message) {
     if (outError) *outError = signerError(code, message);
+}
+
+static NSString *messageForNSError(NSError *error) {
+    if (!error) return nil;
+    NSString *description = error.localizedDescription;
+    if (description.length > 0) return description;
+    return [NSString stringWithFormat:@"%@ (%ld)", error.domain, (long)error.code];
+}
+
+static WalletSignerErrorCode signerErrorCodeForPublicDerivationError(NSError *error) {
+    if (![error.domain isEqualToString:WalletPublicKeyDerivationErrorDomain]) {
+        return WalletSignerErrorInternal;
+    }
+
+    switch (error.code) {
+        case WalletPublicKeyDerivationErrorInvalidRootPublicKey:
+        case WalletPublicKeyDerivationErrorInvalidChainCode:
+        case WalletPublicKeyDerivationErrorInvalidPath:
+            return WalletSignerErrorInvalidInput;
+        case WalletPublicKeyDerivationErrorUnsupportedHardenedPath:
+            return WalletSignerErrorUnsupported;
+        case WalletPublicKeyDerivationErrorDerivationFailed:
+        case WalletPublicKeyDerivationErrorRandomFailed:
+            return WalletSignerErrorInternal;
+    }
+    NSCAssert(NO, @"Unhandled public derivation error code");
+    return WalletSignerErrorInternal;
+}
+
+static BOOL derivationPathContainsHardenedComponent(NSString *derivationPath) {
+    NSArray<NSString *> *components = [derivationPath componentsSeparatedByString:@"/"];
+    for (NSUInteger i = 1; i < components.count; i++) {
+        NSString *component = components[i];
+        if ([component hasSuffix:@"'"] ||
+            [component hasSuffix:@"h"] ||
+            [component hasSuffix:@"H"]) {
+            return YES;
+        }
+    }
+    return NO;
 }
 
 static BOOL ensureWallyInitialized(void) {
@@ -354,7 +395,123 @@ static BOOL rootFingerprint(WalletShareEnvelope *shareEnvelope,
 
 @end
 
+@interface WalletSigner () {
+    WalletShareEnvelope *_shareEnvelope;
+}
+
+@end
+
 @implementation WalletSigner
+
+- (instancetype)init {
+    self = [super init];
+    return self;
+}
+
+- (nullable NSData *)bootstrapWithError:(NSError **)outError {
+    NSError *error = nil;
+    WalletShareEnvelope *shareEnvelope =
+        [WalletShareEnvelope loadOrBootstrapFromDefaultStorageWithError:&error];
+    if (!shareEnvelope) {
+        if (outError) *outError = error;
+        return nil;
+    }
+
+    NSData *jointPublicKey = shareEnvelope.jointCompressedPublicKey;
+    if (jointPublicKey.length != kCompressedPublicKeySize) {
+        setSignerError(outError,
+                       WalletSignerErrorInternal,
+                       @"Wallet root public key is unavailable");
+        return nil;
+    }
+
+    _shareEnvelope = shareEnvelope;
+    return [jointPublicKey copy];
+}
+
+- (nullable NSData *)publicKeyForDerivationPath:(NSString *)derivationPath
+                                          error:(NSError **)outError {
+    if (![derivationPath isEqualToString:@"m"] &&
+        ![derivationPath hasPrefix:@"m/"]) {
+        setSignerError(outError,
+                       WalletSignerErrorInvalidInput,
+                       @"Derivation path must start at m");
+        return nil;
+    }
+    if (derivationPathContainsHardenedComponent(derivationPath)) {
+        setSignerError(outError,
+                       WalletSignerErrorUnsupported,
+                       @"Hardened public derivation is not supported from the split root key");
+        return nil;
+    }
+    if (!_shareEnvelope) {
+        setSignerError(outError,
+                       WalletSignerErrorUnavailable,
+                       @"Wallet material is unavailable");
+        return nil;
+    }
+
+    if ([derivationPath isEqualToString:@"m"]) {
+        NSData *jointPublicKey = _shareEnvelope.jointCompressedPublicKey;
+        if (jointPublicKey.length != kCompressedPublicKeySize) {
+            setSignerError(outError,
+                           WalletSignerErrorInternal,
+                           @"Wallet root public key is unavailable");
+            return nil;
+        }
+        return [jointPublicKey copy];
+    }
+
+    NSData *jointPublicKey = _shareEnvelope.jointCompressedPublicKey;
+    NSData *chainCode = _shareEnvelope.chainCode;
+    if (jointPublicKey.length != kCompressedPublicKeySize ||
+        chainCode.length != kScalarSize) {
+        setSignerError(outError,
+                       WalletSignerErrorUnavailable,
+                       @"Wallet public derivation material is unavailable");
+        return nil;
+    }
+
+    NSError *error = nil;
+    NSData *publicKey =
+        [WalletPublicKeyDerivation publicKeyForRootCompressedPublicKey:jointPublicKey
+                                                             chainCode:chainCode
+                                                        derivationPath:derivationPath
+                                                                 error:&error];
+    if (!publicKey) {
+        setSignerError(outError,
+                       signerErrorCodeForPublicDerivationError(error),
+                       messageForNSError(error) ?: @"Could not derive public key");
+        return nil;
+    }
+    return publicKey;
+}
+
+- (nullable NSData *)ethereumSignatureForTransaction:(NSData *)transaction
+                                               error:(NSError **)outError {
+    if (!_shareEnvelope) {
+        setSignerError(outError,
+                       WalletSignerErrorUnavailable,
+                       @"Wallet material is unavailable");
+        return nil;
+    }
+    return [WalletSigner ethereumSignatureForTransaction:transaction
+                                           shareEnvelope:_shareEnvelope
+                                                   error:outError];
+}
+
+- (nullable NSData *)signedPSBTForData:(NSData *)psbtData
+                                 error:(NSError **)outError {
+    if (!_shareEnvelope) {
+        setSignerError(outError,
+                       WalletSignerErrorUnavailable,
+                       @"Wallet material is unavailable");
+        return nil;
+    }
+    return [WalletSigner signedPSBTForData:psbtData
+                             shareEnvelope:_shareEnvelope
+                                     error:outError];
+}
 
 + (nullable WalletECDSASignature *)signatureForDigest:(NSData *)digest32
                                                shareA:(NSData *)shareA
@@ -554,10 +711,9 @@ cleanup:
         return nil;
     }
 
-    HardenedBuffer *shareABuffer = [HardenedBuffer bufferWithLength:kScalarSize error:outError];
-    if (!shareABuffer) return nil;
-    HardenedBuffer *shareBBuffer = [HardenedBuffer bufferWithLength:kScalarSize error:outError];
-    if (!shareBBuffer) return nil;
+    HardenedShareWindow *shareWindow = [HardenedShareWindow windowWithShareLength:kScalarSize
+                                                                            error:outError];
+    if (!shareWindow) return nil;
 
     secp256k1_context *ctx = signerContext(outError);
     if (!ctx) return nil;
@@ -634,31 +790,43 @@ cleanup:
         secureWipe(compressedNonce, sizeof(compressedNonce));
         secureWipe(uncompressedNonce, sizeof(uncompressedNonce));
 
-        if (![shareEnvelope unwrapShare:WalletShareEnvelopeShareB
-                     intoHardenedBuffer:shareBBuffer
-                                  error:outError]) {
-            goto cleanup;
-        }
-        BOOL usedB = scalarMultiply(r, (const uint8_t *)[shareBBuffer mutableBytes], rb);
-        if (![shareBBuffer wipeAndMaskWithError:outError]) goto cleanup;
-        if (!usedB) {
-            setSignerError(outError,
-                           WalletSignerErrorSigningFailed,
-                           @"Could not compose share B ECDSA scalar");
-            goto cleanup;
-        }
-
-        if (![shareEnvelope unwrapShare:WalletShareEnvelopeShareA
-                     intoHardenedBuffer:shareABuffer
-                                  error:outError]) {
-            goto cleanup;
-        }
-        BOOL usedA = scalarMultiply(rb, (const uint8_t *)[shareABuffer mutableBytes], rab);
-        if (![shareABuffer wipeAndMaskWithError:outError]) goto cleanup;
-        if (!usedA) {
-            setSignerError(outError,
-                           WalletSignerErrorSigningFailed,
-                           @"Could not compose share A ECDSA scalar");
+        uint8_t *rbBytes = rb;
+        uint8_t *rabBytes = rab;
+        const uint8_t *rBytes = r;
+        if (![shareEnvelope performWithHardenedShareWindow:shareWindow
+                                                 shareAUse:^BOOL(const uint8_t *shareBytes,
+                                                                 NSUInteger shareLength,
+                                                                 NSError **error) {
+            if (shareLength != kScalarSize) {
+                setSignerError(error,
+                               WalletSignerErrorInternal,
+                               @"Unexpected signing share A length");
+                return NO;
+            }
+            if (!scalarMultiply(rBytes, shareBytes, rbBytes)) {
+                setSignerError(error,
+                               WalletSignerErrorSigningFailed,
+                               @"Could not compose share A ECDSA scalar");
+                return NO;
+            }
+            return YES;
+        } shareBUse:^BOOL(const uint8_t *shareBytes,
+                          NSUInteger shareLength,
+                          NSError **error) {
+            if (shareLength != kScalarSize) {
+                setSignerError(error,
+                               WalletSignerErrorInternal,
+                               @"Unexpected signing share B length");
+                return NO;
+            }
+            if (!scalarMultiply(rbBytes, shareBytes, rabBytes)) {
+                setSignerError(error,
+                               WalletSignerErrorSigningFailed,
+                               @"Could not compose share B ECDSA scalar");
+                return NO;
+            }
+            return YES;
+        } error:outError]) {
             goto cleanup;
         }
 
@@ -711,8 +879,6 @@ cleanup:
                       recoveryID:recoveryID];
 
 cleanup:
-    if (shareABuffer.state == HardenedBufferStateUnmasked) [shareABuffer wipeAndMaskWithError:NULL];
-    if (shareBBuffer.state == HardenedBufferStateUnmasked) [shareBBuffer wipeAndMaskWithError:NULL];
     secureWipe(digestScalar, sizeof(digestScalar));
     secureWipe(kA, sizeof(kA));
     secureWipe(kB, sizeof(kB));
