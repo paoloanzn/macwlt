@@ -6,7 +6,6 @@
 
 #import "SEKeyManager.h"
 
-#define WALLET_TAG "app.macwlt.signing.v1"
 #define SE_KEY_ERROR_DOMAIN "app.macwlt.signing.v1"
 
 /*
@@ -16,8 +15,11 @@
  */
 static CFStringRef kTokenOID(void) { return CFSTR("toid"); }
 
-static const CFOptionFlags kKeyAccessFlags = kSecAccessControlPrivateKeyUsage
-                                           | kSecAccessControlBiometryAny;
+typedef struct {
+    const char *tag;
+    NSString *blobName;
+    CFOptionFlags accessFlags;
+} SEKeyPurposeConfig;
 
 typedef NS_ENUM(NSInteger, SEKeyErrorCode) {
     SEKeyErrorMissingTokenOID = 1,
@@ -39,8 +41,33 @@ static void setCFError(NSError **outError, CFErrorRef error) {
     else CFRelease(error);
 }
 
-static NSData *kWalletTag(void) {
-    return [@WALLET_TAG dataUsingEncoding:NSUTF8StringEncoding];
+static SEKeyPurposeConfig configForPurpose(SEKeyPurpose purpose) {
+    switch (purpose) {
+        case SEKeyPurposeLegacyEnvelope:
+            return (SEKeyPurposeConfig){
+                "app.macwlt.signing.v1",
+                @"se-token.blob",
+                kSecAccessControlPrivateKeyUsage | kSecAccessControlBiometryAny,
+            };
+        case SEKeyPurposeSigningShareA:
+            return (SEKeyPurposeConfig){
+                "app.macwlt.signing-share-a.v1",
+                @"se-token-A.blob",
+                kSecAccessControlPrivateKeyUsage | kSecAccessControlBiometryCurrentSet,
+            };
+        case SEKeyPurposeSigningShareB:
+            return (SEKeyPurposeConfig){
+                "app.macwlt.signing-share-b.v1",
+                @"se-token-B.blob",
+                kSecAccessControlPrivateKeyUsage | kSecAccessControlBiometryCurrentSet,
+            };
+    }
+    NSCAssert(NO, @"Unhandled Secure Enclave key purpose");
+    return (SEKeyPurposeConfig){
+        "app.macwlt.signing.v1",
+        @"se-token.blob",
+        kSecAccessControlPrivateKeyUsage | kSecAccessControlBiometryAny,
+    };
 }
 
 static NSString *blobDirectoryPath(void) {
@@ -48,8 +75,9 @@ static NSString *blobDirectoryPath(void) {
             @"Library/Application Support/macwlt"];
 }
 
-static NSString *blobPath(void) {
-    return [blobDirectoryPath() stringByAppendingPathComponent:@"se-token.blob"];
+static NSString *blobPathForPurpose(SEKeyPurpose purpose) {
+    SEKeyPurposeConfig config = configForPurpose(purpose);
+    return [blobDirectoryPath() stringByAppendingPathComponent:config.blobName];
 }
 
 static NSString * _Nullable ensureBlobDirectory(NSError **outError) {
@@ -61,18 +89,18 @@ static NSString * _Nullable ensureBlobDirectory(NSError **outError) {
     return ok ? dir : nil;
 }
 
-static NSData *loadStoredBlob(NSError **outError) {
-    NSString *path = blobPath();
+static NSData *loadStoredBlobForPurpose(SEKeyPurpose purpose, NSError **outError) {
+    NSString *path = blobPathForPurpose(purpose);
     if (![[NSFileManager defaultManager] fileExistsAtPath:path]) return nil;
     return [NSData dataWithContentsOfFile:path
                                   options:0
                                     error:outError];
 }
 
-static BOOL storeBlob(NSData *blob, NSError **outError) {
+static BOOL storeBlobForPurpose(NSData *blob, SEKeyPurpose purpose, NSError **outError) {
     if (!ensureBlobDirectory(outError)) return NO;
 
-    NSString *path = blobPath();
+    NSString *path = blobPathForPurpose(purpose);
     if (![blob writeToFile:path options:NSDataWritingAtomic error:outError]) return NO;
     if (![[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @0600}
                                           ofItemAtPath:path
@@ -82,12 +110,22 @@ static BOOL storeBlob(NSData *blob, NSError **outError) {
     return YES;
 }
 
-static SecKeyRef makeSEKey(NSData **outBlob, NSError **outError) {
+static NSData *tagDataForPurpose(SEKeyPurpose purpose) {
+    SEKeyPurposeConfig config = configForPurpose(purpose);
+    NSString *tag = [NSString stringWithUTF8String:config.tag];
+    NSCAssert(tag.length > 0, @"Secure Enclave key tag must be valid UTF-8");
+    return [tag dataUsingEncoding:NSUTF8StringEncoding];
+}
+
+static SecKeyRef makeSEKeyForPurpose(SEKeyPurpose purpose,
+                                     NSData **outBlob,
+                                     NSError **outError) {
+    SEKeyPurposeConfig config = configForPurpose(purpose);
     CFErrorRef accessError = NULL;
     SecAccessControlRef access = SecAccessControlCreateWithFlags(
         kCFAllocatorDefault,
         kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-        kKeyAccessFlags,
+        config.accessFlags,
         &accessError
     );
     if (!access) {
@@ -101,7 +139,7 @@ static SecKeyRef makeSEKey(NSData **outBlob, NSError **outError) {
         (__bridge id)kSecAttrTokenID: (__bridge id)kSecAttrTokenIDSecureEnclave,
         (__bridge id)kSecPrivateKeyAttrs: @{
             (__bridge id)kSecAttrIsPermanent: @NO,
-            (__bridge id)kSecAttrApplicationTag: kWalletTag(),
+            (__bridge id)kSecAttrApplicationTag: tagDataForPurpose(purpose),
             (__bridge id)kSecAttrAccessControl: (__bridge id)access,
         },
     };
@@ -179,8 +217,12 @@ static BOOL probeSecureEnclaveAvailability(void) {
 }
 
 + (SecKeyRef)copyKeyWithError:(NSError **)outError {
+    return [self copyKeyForPurpose:SEKeyPurposeLegacyEnvelope error:outError];
+}
+
++ (SecKeyRef)copyKeyForPurpose:(SEKeyPurpose)purpose error:(NSError **)outError {
     NSError *storageError = nil;
-    NSData *stored = loadStoredBlob(&storageError);
+    NSData *stored = loadStoredBlobForPurpose(purpose, &storageError);
     if (storageError) {
         if (outError) *outError = storageError;
         return NULL;
@@ -188,9 +230,9 @@ static BOOL probeSecureEnclaveAvailability(void) {
     if (stored) return reconstructSEKey(stored, outError);
 
     NSData *blob = nil;
-    SecKeyRef key = makeSEKey(&blob, outError);
+    SecKeyRef key = makeSEKeyForPurpose(purpose, &blob, outError);
     if (!key) return NULL;
-    if (!storeBlob(blob, outError)) {
+    if (!storeBlobForPurpose(blob, purpose, outError)) {
         CFRelease(key);
         return NULL;
     }
