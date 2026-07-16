@@ -30,9 +30,10 @@ ENTITLEMENTS ?=
 CODESIGN_IDENTITY ?= -
 CODESIGN_OPTIONS ?=
 
-CC := clang
+CC := $(shell xcrun --find clang 2>/dev/null || command -v clang)
 OPENSSL_PREFIX ?= $(shell brew --prefix openssl@3)
 MACOSX_SDK ?= $(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null)
+export SDKROOT := $(MACOSX_SDK)
 CPPFLAGS ?=
 CFLAGS ?= -fobjc-arc -Wall -Wextra
 LDFLAGS ?=
@@ -59,7 +60,7 @@ $(WALLY_CONFIGURE): .gitmodules
 
 $(WALLY_MAKEFILE): $(WALLY_CONFIGURE)
 	@mkdir -p $(WALLY_BUILD_DIR)
-	cd $(WALLY_BUILD_DIR) && CC="$(CC)" ../../$(WALLY_DIR)/configure \
+	cd $(WALLY_BUILD_DIR) && SDKROOT="$(MACOSX_SDK)" CC="$(CC)" ../../$(WALLY_DIR)/configure \
 		--disable-shared \
 		--enable-static \
 		--disable-tests \

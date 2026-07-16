@@ -6,6 +6,7 @@
 
 #import "WalletEnvelopeManager.h"
 #import "BIP32.h"
+#import "SecureWipe.h"
 
 #import <dispatch/dispatch.h>
 #import <secp256k1.h>
@@ -82,8 +83,7 @@ static BOOL validateSecp256k1Secret(NSData *secret, NSError **outError) {
 }
 
 static void secureClearMutableData(NSMutableData *data) {
-    if (!data.mutableBytes || data.length == 0) return;
-    (void)memset_s(data.mutableBytes, data.length, 0, data.length);
+    secureWipe(data.mutableBytes, data.length);
 }
 
 static NSMutableData *randomSecp256k1Secret(NSError **outError) {

@@ -5,6 +5,7 @@
  */
 
 #include "BIP32.h"
+#include "SecureWipe.h"
 
 #include <string.h>
 
@@ -14,8 +15,7 @@
 static const char kMasterKey[] = "Bitcoin seed";
 
 static void secureClear(void *ptr, size_t len) {
-    if (!ptr || len == 0) return;
-    (void)memset_s(ptr, len, 0, len);
+    secureWipe(ptr, len);
 }
 
 static void ser32(uint32_t value, uint8_t out[4]) {
