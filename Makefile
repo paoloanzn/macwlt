@@ -5,8 +5,17 @@ TARGET ?= macwlt
 PREFIX ?= /usr/local
 
 SRC := $(shell find src -type f -name '*.m' | sort)
+HEADERS := $(shell find src -type f -name '*.h' | sort)
+TEST_SRC := tests/core_tests.m \
+	src/core/Address.m \
+	src/core/Bech32.m \
+	src/core/hex.m \
+	src/core/Mnemonic.m \
+	src/core/PSBT.m \
+	src/core/RIPEMD160.m
 BUILD_DIR := build
 BIN := $(BUILD_DIR)/$(TARGET)
+TEST_BIN := $(BUILD_DIR)/core_tests
 WORDLIST := bip39-2048.txt
 WORDLIST_INC := $(BUILD_DIR)/bip39_wordlist.inc
 WALLY_DIR := vendor/libwally-core
@@ -23,18 +32,23 @@ CODESIGN_OPTIONS ?=
 
 CC := clang
 OPENSSL_PREFIX ?= $(shell brew --prefix openssl@3)
+MACOSX_SDK ?= $(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null)
 CPPFLAGS ?=
 CFLAGS ?= -fobjc-arc -Wall -Wextra
 LDFLAGS ?=
 CPPFLAGS += -DWALLY_ABI_NO_ELEMENTS -I$(WALLY_DIR)/include -I$(WALLY_DIR)/src/secp256k1/include -I$(OPENSSL_PREFIX)/include
+CFLAGS += $(if $(MACOSX_SDK),-isysroot $(MACOSX_SDK))
 LDFLAGS += -L$(OPENSSL_PREFIX)/lib
 LDLIBS ?= -framework Foundation -framework Security -framework AppKit -framework Cocoa
 LDLIBS += $(WALLY_LIB) $(WALLY_SECP256K1_LIB) -lcrypto -lz
 CODESIGN ?= codesign
 
-.PHONY: build install clean submodules
+.PHONY: build test install clean submodules
 
 build: $(BIN)
+
+test: $(TEST_BIN)
+	$(TEST_BIN)
 
 submodules:
 	git submodule update --init --recursive
@@ -62,10 +76,14 @@ $(WORDLIST_INC): $(WORDLIST)
 	@mkdir -p $(BUILD_DIR)
 	gzip -cn9 $< | xxd -i > $@
 
-$(BIN): $(SRC) $(WORDLIST_INC) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(ENTITLEMENTS)
+$(BIN): $(SRC) $(HEADERS) $(WORDLIST_INC) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(ENTITLEMENTS)
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(LDLIBS)
 	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS)) $@
+
+$(TEST_BIN): $(TEST_SRC) $(HEADERS) $(WORDLIST_INC) $(WALLY_LIB) $(WALLY_SECP256K1_LIB)
+	@mkdir -p $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -I. -o $@ $(TEST_SRC) $(LDLIBS)
 
 install: build
 	install -d $(DESTDIR)$(PREFIX)/bin

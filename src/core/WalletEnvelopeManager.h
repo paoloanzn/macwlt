@@ -15,9 +15,9 @@ NS_ASSUME_NONNULL_BEGIN
                          publicKey:(SecKeyRef)publicKey
                              error:(NSError * _Nullable * _Nullable)outError;
 
-+ (NSData * _Nullable)envelopeUnwrap:(NSData *)envelope
-                           privateKey:(SecKeyRef)privateKey
-                               error:(NSError * _Nullable * _Nullable)outError;
++ (NSMutableData * _Nullable)envelopeUnwrap:(NSData *)envelope
+                                  privateKey:(SecKeyRef)privateKey
+                                      error:(NSError * _Nullable * _Nullable)outError;
 
 + (NSData * _Nullable)walletBootstrap:(SecKeyRef)publicKey
                                 error:(NSError * _Nullable * _Nullable)outError;

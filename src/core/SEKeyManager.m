@@ -43,25 +43,42 @@ static NSData *kWalletTag(void) {
     return [@WALLET_TAG dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+static NSString *blobDirectoryPath(void) {
+    return [NSHomeDirectory() stringByAppendingPathComponent:
+            @"Library/Application Support/macwlt"];
+}
+
 static NSString *blobPath(void) {
-    NSString *dir = [NSHomeDirectory() stringByAppendingPathComponent:
-                     @"Library/Application Support/macwlt"];
-    [[NSFileManager defaultManager] createDirectoryAtPath:dir
-                              withIntermediateDirectories:YES
-                                               attributes:@{NSFilePosixPermissions: @0700}
-                                                    error:NULL];
-    return [dir stringByAppendingPathComponent:@"se-token.blob"];
+    return [blobDirectoryPath() stringByAppendingPathComponent:@"se-token.blob"];
 }
 
-static NSData *loadStoredBlob(void) {
-    return [NSData dataWithContentsOfFile:blobPath()];
+static NSString * _Nullable ensureBlobDirectory(NSError **outError) {
+    NSString *dir = blobDirectoryPath();
+    BOOL ok = [[NSFileManager defaultManager] createDirectoryAtPath:dir
+                                        withIntermediateDirectories:YES
+                                                         attributes:@{NSFilePosixPermissions: @0700}
+                                                              error:outError];
+    return ok ? dir : nil;
 }
 
-static BOOL storeBlob(NSData *blob) {
+static NSData *loadStoredBlob(NSError **outError) {
     NSString *path = blobPath();
-    if (![blob writeToFile:path options:NSDataWritingAtomic error:NULL]) return NO;
-    [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @0600}
-                                     ofItemAtPath:path error:NULL];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) return nil;
+    return [NSData dataWithContentsOfFile:path
+                                  options:0
+                                    error:outError];
+}
+
+static BOOL storeBlob(NSData *blob, NSError **outError) {
+    if (!ensureBlobDirectory(outError)) return NO;
+
+    NSString *path = blobPath();
+    if (![blob writeToFile:path options:NSDataWritingAtomic error:outError]) return NO;
+    if (![[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @0600}
+                                          ofItemAtPath:path
+                                                 error:outError]) {
+        return NO;
+    }
     return YES;
 }
 
@@ -126,14 +143,20 @@ static SecKeyRef reconstructSEKey(NSData *blob, NSError **outError) {
 @implementation SEKeyManager
 
 + (SecKeyRef)copyKeyWithError:(NSError **)outError {
-    NSData *stored = loadStoredBlob();
+    NSError *storageError = nil;
+    NSData *stored = loadStoredBlob(&storageError);
+    if (storageError) {
+        if (outError) *outError = storageError;
+        return NULL;
+    }
     if (stored) return reconstructSEKey(stored, outError);
 
     NSData *blob = nil;
     SecKeyRef key = makeSEKey(&blob, outError);
     if (!key) return NULL;
-    if (!storeBlob(blob)) {
-        NSLog(@"warning: could not persist SE key blob; it will not survive restart");
+    if (!storeBlob(blob, outError)) {
+        CFRelease(key);
+        return NULL;
     }
     return key;
 }

@@ -5,21 +5,24 @@
  */
 
 #import "WalletViewController.h"
-#import "WalletEnvelopeManager.h"
+#import "WalletService.h"
 #import "hex.h"
-
-#import <CommonCrypto/CommonDigest.h>
 
 #define INPUT_PLACEHOLDER_STRING    "Message To Sign"
 #define OUTPUT_PLACEHOLDER_STRING   "bootstrapping ephemeral wallet..."
 
 @interface WalletViewController ()
 
-@property (nonatomic, strong, nullable) NSData *walletEnvelope;
+@property (nonatomic, strong) NSTextField *input;
+@property (nonatomic, strong) NSTextField *output;
+@property (nonatomic, strong) NSButton *signButton;
+@property (nonatomic, strong) WalletService *walletService;
+@property (nonatomic, copy, nullable) NSData *walletEnvelope;
 
 - (void)bootstrapWallet;
 - (void)showOutput:(NSString *)message;
 - (void)showError:(NSError *)error;
+- (void)doSign:(id)sender;
 
 @end
 
@@ -36,6 +39,7 @@
 }
 
 - (void)loadView {
+    self.walletService = [[WalletService alloc] init];
     self.input = [NSTextField textFieldWithString:@INPUT_PLACEHOLDER_STRING];
     self.output = [NSTextField labelWithString:@OUTPUT_PLACEHOLDER_STRING];
     self.signButton = [NSButton buttonWithTitle:@"Sign" target:self action:@selector(doSign:)];
@@ -57,23 +61,7 @@
         dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0),
         ^{
             NSError *error = nil;
-            SecKeyRef key = [SEKeyManager copyKeyWithError:&error];
-            if (!key) {
-                [self showError:error];
-                return;
-            }
-
-            SecKeyRef publicKey = SecKeyCopyPublicKey(key);
-            if (!publicKey) {
-                CFRelease(key);
-                [self showOutput:@"error: could not copy Secure Enclave public key"];
-                return;
-            }
-
-            NSData *envelope = [WalletEnvelopeManager walletBootstrap:publicKey error:&error];
-            CFRelease(publicKey);
-            CFRelease(key);
-
+            NSData *envelope = [self.walletService bootstrapWalletWithError:&error];
             if (!envelope) {
                 [self showError:error];
                 return;
@@ -100,22 +88,9 @@
         dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0),
         ^{
             NSError *error = nil;
-            SecKeyRef key = [SEKeyManager copyKeyWithError:&error];
-            if (!key) {
-                [self showError:error];
-                return;
-            }
-
-            NSData *msg = [text dataUsingEncoding:NSUTF8StringEncoding];
-            uint8_t digest[CC_SHA256_DIGEST_LENGTH];
-            CC_SHA256(msg.bytes, (CC_LONG)msg.length, digest);
-
-            NSData *digestData = [NSData dataWithBytes:digest length:sizeof(digest)];
-            NSData *sig = [WalletEnvelopeManager signWithSecp256k1:digestData
-                                                          envelope:envelope
-                                                               key:key
-                                                             error:&error];
-            CFRelease(key);
+            NSData *sig = [self.walletService signatureForMessage:text
+                                                         envelope:envelope
+                                                            error:&error];
 
             if (sig) {
                 [self showOutput:hex(sig)];

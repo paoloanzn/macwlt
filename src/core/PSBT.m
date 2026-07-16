@@ -90,16 +90,8 @@ static struct wally_tx *PSBTTransactionFromData(NSData *data, NSError **outError
     struct wally_psbt *_psbt;
 }
 
-- (instancetype)init {
-    if (!PSBTEnsureWally(NULL)) return nil;
-
-    struct wally_psbt *psbt = NULL;
-    int ret = wally_psbt_init_alloc(WALLY_PSBT_VERSION_0, 0, 0, 0, 0, &psbt);
-    if (ret != WALLY_OK) return nil;
-    return [self initWithWallyPSBT:psbt];
-}
-
 - (nullable instancetype)initWithWallyPSBT:(struct wally_psbt *)psbt {
+    NSParameterAssert(psbt);
     self = [super init];
     if (self) {
         _psbt = psbt;
@@ -156,16 +148,21 @@ static struct wally_tx *PSBTTransactionFromData(NSData *data, NSError **outError
 
 + (nullable instancetype)version2PSBTWithInputCount:(NSUInteger)inputCount
                                         outputCount:(NSUInteger)outputCount
-                                 transactionVersion:(uint32_t)transactionVersion {
-    if (!PSBTEnsureWally(NULL)) return nil;
+                                 transactionVersion:(uint32_t)transactionVersion
+                                              error:(NSError **)outError {
+    if (!PSBTEnsureWally(outError)) return nil;
 
     struct wally_psbt *psbt = NULL;
     int ret = wally_psbt_init_alloc(WALLY_PSBT_VERSION_2, inputCount, outputCount, 0, 0, &psbt);
-    if (ret != WALLY_OK) return nil;
+    if (ret != WALLY_OK) {
+        PSBTFailWally(outError, @"wally_psbt_init_alloc", ret);
+        return nil;
+    }
 
     ret = wally_psbt_set_tx_version(psbt, transactionVersion);
     if (ret != WALLY_OK) {
         wally_psbt_free(psbt);
+        PSBTFailWally(outError, @"wally_psbt_set_tx_version", ret);
         return nil;
     }
 
@@ -178,6 +175,7 @@ static struct wally_tx *PSBTTransactionFromData(NSData *data, NSError **outError
         if (input) wally_tx_input_free(input);
         if (ret != WALLY_OK) {
             wally_psbt_free(psbt);
+            PSBTFailWally(outError, @"wally_psbt_add_tx_input_at", ret);
             return nil;
         }
     }
@@ -189,6 +187,7 @@ static struct wally_tx *PSBTTransactionFromData(NSData *data, NSError **outError
         if (output) wally_tx_output_free(output);
         if (ret != WALLY_OK) {
             wally_psbt_free(psbt);
+            PSBTFailWally(outError, @"wally_psbt_add_tx_output_at", ret);
             return nil;
         }
     }
@@ -212,24 +211,31 @@ static struct wally_tx *PSBTTransactionFromData(NSData *data, NSError **outError
 - (uint32_t)version {
     size_t version = 0;
     int ret = wally_psbt_get_version(_psbt, &version);
+    NSAssert(ret == WALLY_OK, @"wally_psbt_get_version failed with code %d", ret);
     return ret == WALLY_OK ? (uint32_t)version : 0;
 }
 
-- (void)setVersion:(uint32_t)version {
-    if (version == WALLY_PSBT_VERSION_0 || version == WALLY_PSBT_VERSION_2) {
-        (void)wally_psbt_set_version(_psbt, 0, version);
+- (BOOL)updateVersion:(uint32_t)version error:(NSError **)outError {
+    if (version != WALLY_PSBT_VERSION_0 && version != WALLY_PSBT_VERSION_2) {
+        return PSBTFail(outError, PSBTErrorUnsupportedVersion,
+                        @"unsupported PSBT version %u", version);
     }
+    int ret = wally_psbt_set_version(_psbt, 0, version);
+    if (ret == WALLY_OK) return YES;
+    return PSBTFailWally(outError, @"wally_psbt_set_version", ret);
 }
 
 - (NSUInteger)inputCount {
     size_t count = 0;
     int ret = wally_psbt_get_num_inputs(_psbt, &count);
+    NSAssert(ret == WALLY_OK, @"wally_psbt_get_num_inputs failed with code %d", ret);
     return ret == WALLY_OK ? count : 0;
 }
 
 - (NSUInteger)outputCount {
     size_t count = 0;
     int ret = wally_psbt_get_num_outputs(_psbt, &count);
+    NSAssert(ret == WALLY_OK, @"wally_psbt_get_num_outputs failed with code %d", ret);
     return ret == WALLY_OK ? count : 0;
 }
 
@@ -243,13 +249,13 @@ static struct wally_tx *PSBTTransactionFromData(NSData *data, NSError **outError
     return data;
 }
 
-- (void)setUnsignedTransaction:(NSData *)unsignedTransaction {
-    if (!unsignedTransaction) return;
-
-    struct wally_tx *tx = PSBTTransactionFromData(unsignedTransaction, NULL);
-    if (!tx) return;
-    (void)wally_psbt_set_global_tx(_psbt, tx);
+- (BOOL)updateUnsignedTransaction:(NSData *)unsignedTransaction error:(NSError **)outError {
+    struct wally_tx *tx = PSBTTransactionFromData(unsignedTransaction, outError);
+    if (!tx) return NO;
+    int ret = wally_psbt_set_global_tx(_psbt, tx);
     wally_tx_free(tx);
+    if (ret == WALLY_OK) return YES;
+    return PSBTFailWally(outError, @"wally_psbt_set_global_tx", ret);
 }
 
 - (NSNumber *)transactionVersion {
@@ -258,10 +264,10 @@ static struct wally_tx *PSBTTransactionFromData(NSData *data, NSError **outError
     return ret == WALLY_OK ? @(txVersion) : nil;
 }
 
-- (void)setTransactionVersion:(NSNumber *)transactionVersion {
-    if (transactionVersion) {
-        (void)wally_psbt_set_tx_version(_psbt, transactionVersion.unsignedIntValue);
-    }
+- (BOOL)updateTransactionVersion:(uint32_t)transactionVersion error:(NSError **)outError {
+    int ret = wally_psbt_set_tx_version(_psbt, transactionVersion);
+    if (ret == WALLY_OK) return YES;
+    return PSBTFailWally(outError, @"wally_psbt_set_tx_version", ret);
 }
 
 - (NSNumber *)fallbackLocktime {
@@ -274,12 +280,18 @@ static struct wally_tx *PSBTTransactionFromData(NSData *data, NSError **outError
     return ret == WALLY_OK ? @(locktime) : nil;
 }
 
-- (void)setFallbackLocktime:(NSNumber *)fallbackLocktime {
+- (BOOL)updateFallbackLocktime:(NSNumber *)fallbackLocktime error:(NSError **)outError {
+    int ret = WALLY_OK;
     if (fallbackLocktime) {
-        (void)wally_psbt_set_fallback_locktime(_psbt, fallbackLocktime.unsignedIntValue);
+        ret = wally_psbt_set_fallback_locktime(_psbt, fallbackLocktime.unsignedIntValue);
     } else {
-        (void)wally_psbt_clear_fallback_locktime(_psbt);
+        ret = wally_psbt_clear_fallback_locktime(_psbt);
     }
+    if (ret == WALLY_OK) return YES;
+    NSString *operation = fallbackLocktime
+        ? @"wally_psbt_set_fallback_locktime"
+        : @"wally_psbt_clear_fallback_locktime";
+    return PSBTFailWally(outError, operation, ret);
 }
 
 - (NSNumber *)txModifiableFlags {
@@ -288,8 +300,11 @@ static struct wally_tx *PSBTTransactionFromData(NSData *data, NSError **outError
     return ret == WALLY_OK ? @(flags) : nil;
 }
 
-- (void)setTxModifiableFlags:(NSNumber *)txModifiableFlags {
-    (void)wally_psbt_set_tx_modifiable_flags(_psbt, txModifiableFlags ? txModifiableFlags.unsignedIntValue : 0);
+- (BOOL)updateTxModifiableFlags:(NSNumber *)txModifiableFlags error:(NSError **)outError {
+    uint32_t flags = txModifiableFlags ? txModifiableFlags.unsignedIntValue : 0;
+    int ret = wally_psbt_set_tx_modifiable_flags(_psbt, flags);
+    if (ret == WALLY_OK) return YES;
+    return PSBTFailWally(outError, @"wally_psbt_set_tx_modifiable_flags", ret);
 }
 
 - (nullable NSData *)serializedDataWithError:(NSError **)outError {

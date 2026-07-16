@@ -81,9 +81,9 @@ static BOOL validateSecp256k1Secret(NSData *secret, NSError **outError) {
     return YES;
 }
 
-static void secureClearData(NSData *data) {
-    if (!data.bytes || data.length == 0) return;
-    (void)memset_s((void *)data.bytes, data.length, 0, data.length);
+static void secureClearMutableData(NSMutableData *data) {
+    if (!data.mutableBytes || data.length == 0) return;
+    (void)memset_s(data.mutableBytes, data.length, 0, data.length);
 }
 
 static NSMutableData *randomSecp256k1Secret(NSError **outError) {
@@ -93,14 +93,14 @@ static NSMutableData *randomSecp256k1Secret(NSError **outError) {
                                         kSecp256k1SecretSize,
                                         secret.mutableBytes);
         if (status != errSecSuccess) {
-            secureClearData(secret);
+            secureClearMutableData(secret);
             setError(outError, WalletEnvelopeErrorRandomFailed,
                      @"Could not generate random wallet secret");
             return nil;
         }
 
         if (validateSecp256k1Secret(secret, NULL)) return secret;
-        secureClearData(secret);
+        secureClearMutableData(secret);
     }
 
     setError(outError, WalletEnvelopeErrorInvalidSecp256k1Secret,
@@ -108,9 +108,9 @@ static NSMutableData *randomSecp256k1Secret(NSError **outError) {
     return nil;
 }
 
-static NSData *decryptEnvelope(NSData *envelope,
-                               SecKeyRef privateKey,
-                               NSError **outError) {
+static NSMutableData *decryptEnvelope(NSData *envelope,
+                                      SecKeyRef privateKey,
+                                      NSError **outError) {
     SecKeyAlgorithm algorithm = envelopeAlgorithm();
     if (!privateKey || !SecKeyIsAlgorithmSupported(privateKey,
                                                    kSecKeyOperationTypeDecrypt,
@@ -131,7 +131,7 @@ static NSData *decryptEnvelope(NSData *envelope,
         setCFError(outError, error);
         return nil;
     }
-    return decrypted;
+    return [decrypted mutableCopy];
 }
 
 @implementation WalletEnvelopeManager
@@ -161,14 +161,14 @@ static NSData *decryptEnvelope(NSData *envelope,
     return envelope;
 }
 
-+ (NSData *)envelopeUnwrap:(NSData *)envelope
-                privateKey:(SecKeyRef)privateKey
-                    error:(NSError **)outError {
-    NSData *secret = decryptEnvelope(envelope, privateKey, outError);
++ (NSMutableData *)envelopeUnwrap:(NSData *)envelope
+                        privateKey:(SecKeyRef)privateKey
+                            error:(NSError **)outError {
+    NSMutableData *secret = decryptEnvelope(envelope, privateKey, outError);
     if (!secret) return nil;
 
     if (!validateSecp256k1Secret(secret, outError)) {
-        secureClearData(secret);
+        secureClearMutableData(secret);
         return nil;
     }
     return secret;
@@ -183,7 +183,7 @@ static NSData *decryptEnvelope(NSData *envelope,
     @try {
         envelope = [self envelopeWrap:secret publicKey:publicKey error:outError];
     } @finally {
-        secureClearData(secret);
+        secureClearMutableData(secret);
     }
     return envelope;
 }
@@ -202,11 +202,11 @@ static NSData *decryptEnvelope(NSData *envelope,
         return nil;
     }
 
-    // Back the node with NSMutableData so it can be wiped with secureClearData.
+    // Back the node with NSMutableData so it can be wiped with secureClearMutableData.
     NSMutableData *nodeData = [NSMutableData dataWithLength:sizeof(ExtKey)];
     ExtKey *node = nodeData.mutableBytes;
     if (!bip32Derive(ctx, seed.bytes, seed.length, pathStr, node)) {
-        secureClearData(nodeData);
+        secureClearMutableData(nodeData);
         setError(outError, WalletEnvelopeErrorDerivationFailed,
                  @"Could not derive BIP-32 child key for path");
         return nil;
@@ -214,14 +214,14 @@ static NSData *decryptEnvelope(NSData *envelope,
 
     NSMutableData *secret = [NSMutableData dataWithBytes:node->priv
                                                  length:kSecp256k1SecretSize];
-    secureClearData(nodeData);
+    secureClearMutableData(nodeData);
 
     NSData *envelope = nil;
     @try {
         if (!validateSecp256k1Secret(secret, outError)) return nil;
         envelope = [self envelopeWrap:secret publicKey:publicKey error:outError];
     } @finally {
-        secureClearData(secret);
+        secureClearMutableData(secret);
     }
     return envelope;
 }
@@ -239,12 +239,12 @@ static NSData *decryptEnvelope(NSData *envelope,
     secp256k1_context *ctx = secp256k1Context(outError);
     if (!ctx) return nil;
 
-    NSData *secret = [self envelopeUnwrap:envelope privateKey:key error:outError];
+    NSMutableData *secret = [self envelopeUnwrap:envelope privateKey:key error:outError];
     if (!secret) return nil;
 
     secp256k1_ecdsa_signature sig;
     int ok = secp256k1_ecdsa_sign(ctx, &sig, digest32.bytes, secret.bytes, NULL, NULL);
-    secureClearData(secret);
+    secureClearMutableData(secret);
     if (!ok) {
         setError(outError, WalletEnvelopeErrorSigningFailed,
                  @"Could not sign digest with secp256k1 secret");

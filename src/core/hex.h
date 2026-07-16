@@ -6,4 +6,8 @@
 
 #import <Foundation/Foundation.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
 NSString *hex(NSData *d);
+
+NS_ASSUME_NONNULL_END
