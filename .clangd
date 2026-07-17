@@ -19,6 +19,9 @@ If:
   PathMatch: tests/.*
 CompileFlags:
   Add:
+    - -F/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks
+    - -iframework
+    - /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks
     - -I../vendor/libwally-core/include
     - -I../vendor/libwally-core/src/secp256k1/include
     - -I../vendor/XKCP/bin/.build/generic64/libXKCP.a

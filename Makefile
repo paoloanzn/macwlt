@@ -10,7 +10,8 @@ CORE_SRC := $(shell find src/core -type f -name '*.m' | sort)
 SIGNING_SERVICE_SRC := $(filter-out src/core/SigningServiceClient.m,$(filter-out src/ui/%,$(filter-out src/xpc/%,$(ALL_SRC)))) \
 	src/xpc/SigningServiceMain.m
 HEADERS := $(shell find src -type f -name '*.h' | sort)
-TEST_SRC := tests/core_tests.m \
+TEST_SRCS := $(shell find tests -type f -name '*.m' | sort)
+TEST_CORE_SRCS := \
 	src/core/Address.m \
 	src/core/HardenedBuffer.m \
 	src/core/HardenedShareWindow.m \
@@ -30,7 +31,10 @@ TEST_SRC := tests/core_tests.m \
 BUILD_DIR := build
 BIN := $(BUILD_DIR)/$(TARGET)
 LIB := $(BUILD_DIR)/libmacwlt.dylib
-TEST_BIN := $(BUILD_DIR)/core_tests
+TEST_BUNDLE_NAME := MacwltCoreTests
+TEST_BUNDLE := $(BUILD_DIR)/$(TEST_BUNDLE_NAME).xctest
+TEST_BIN := $(TEST_BUNDLE)/Contents/MacOS/$(TEST_BUNDLE_NAME)
+TEST_INFO_PLIST := tests/MacwltCoreTests-Info.plist
 APP_BUNDLE_ID ?= com.macwlt.App
 APP_BUNDLE := $(BUILD_DIR)/macwlt.app
 APP_BUNDLE_BIN := $(APP_BUNDLE)/Contents/MacOS/$(TARGET)
@@ -71,6 +75,33 @@ CFLAGS += $(if $(MACOSX_SDK),-isysroot $(MACOSX_SDK))
 LDLIBS ?= -framework Foundation -framework Security -framework AppKit -framework Cocoa
 LDLIBS += $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) -lz
 CODESIGN ?= codesign
+SELECTED_DEVDIR := $(shell xcode-select -p)
+FALLBACK_XCODE_DEVDIR ?= /Applications/Xcode.app/Contents/Developer
+DEVDIR ?= $(if $(wildcard $(SELECTED_DEVDIR)/usr/bin/xctest),$(SELECTED_DEVDIR),$(FALLBACK_XCODE_DEVDIR))
+XCTEST_PLATFORM := $(DEVDIR)/Platforms/MacOSX.platform/Developer
+XCTEST_FRAMEWORKS := $(XCTEST_PLATFORM)/Library/Frameworks
+XCTEST := $(DEVDIR)/usr/bin/xctest
+TEST_CPPFLAGS := -DWALLY_ABI_NO_ELEMENTS \
+	-I. \
+	-I$(WALLY_DIR)/include \
+	-I$(WALLY_DIR)/src/secp256k1/include \
+	-I$(XKCP_DIR)/bin/.build/$(XKCP_TARGET)/libXKCP.a \
+	-I$(XKCP_DIR)/bin/$(XKCP_TARGET)/libXKCP.a.headers
+TEST_CFLAGS := -fobjc-arc -g -O0 -Wall -Wextra -Werror \
+	-fmodules \
+	-fmodules-cache-path=$(BUILD_DIR)/ModuleCache \
+	-F$(XCTEST_FRAMEWORKS) \
+	-iframework $(XCTEST_FRAMEWORKS) \
+	$(if $(MACOSX_SDK),-isysroot $(MACOSX_SDK))
+TEST_LDFLAGS := -bundle -ObjC \
+	-F$(XCTEST_FRAMEWORKS) \
+	-framework XCTest \
+	-framework Foundation \
+	-framework Security \
+	-framework AppKit \
+	-framework Cocoa \
+	-Wl,-rpath,$(XCTEST_FRAMEWORKS)
+XCTEST_FILTER := $(if $(FILTER),-XCTest $(FILTER),)
 
 .PHONY: build test install clean submodules signing-service app-bundle
 
@@ -81,7 +112,7 @@ signing-service: $(SIGNING_SERVICE_BIN)
 app-bundle: $(APP_BUNDLE_BIN) $(APP_SIGNING_SERVICE_BUNDLE)
 
 test: $(TEST_BIN)
-	$(TEST_BIN)
+	$(XCTEST) $(XCTEST_FILTER) $(TEST_BUNDLE)
 
 submodules:
 	git submodule update --init --recursive
@@ -134,9 +165,10 @@ $(APP_SIGNING_SERVICE_BUNDLE): $(SIGNING_SERVICE_BIN) $(APP_BUNDLE_BIN)
 	ditto $(SIGNING_SERVICE_BUNDLE) $@
 	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(APP_BUNDLE)
 
-$(TEST_BIN): $(TEST_SRC) $(HEADERS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB)
-	@mkdir -p $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -I. -o $@ $(TEST_SRC) $(LDLIBS)
+$(TEST_BIN): $(TEST_SRCS) $(TEST_CORE_SRCS) $(HEADERS) $(TEST_INFO_PLIST) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB)
+	@mkdir -p $(dir $@)
+	cp $(TEST_INFO_PLIST) $(TEST_BUNDLE)/Contents/Info.plist
+	$(CC) $(TEST_CPPFLAGS) $(TEST_CFLAGS) $(TEST_LDFLAGS) $(LDFLAGS) -o $@ $(TEST_SRCS) $(TEST_CORE_SRCS) $(LDLIBS)
 
 install: build
 	install -d $(DESTDIR)$(PREFIX)/bin
