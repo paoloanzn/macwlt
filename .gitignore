@@ -2,3 +2,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
 build/
+node_modules/
+.pnpm-store/

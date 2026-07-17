@@ -6,7 +6,7 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/ARCH2FROSTLibrary.h"
+#import "ARCH2FROSTLibrary.h"
 
 @interface ARCH2FROSTLibraryTests : MacwltTestCase
 @end

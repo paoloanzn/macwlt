@@ -6,7 +6,7 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/Address.h"
+#import "Address.h"
 
 @interface AddressTests : MacwltTestCase
 @end

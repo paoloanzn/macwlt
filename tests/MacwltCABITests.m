@@ -6,7 +6,7 @@
 
 #import "MacwltTestCase.h"
 
-#include "../src/core/macwlt.h"
+#include "macwlt.h"
 #include <string.h>
 
 @interface MacwltCABITests : MacwltTestCase

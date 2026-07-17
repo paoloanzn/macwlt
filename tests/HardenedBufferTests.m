@@ -6,7 +6,7 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/HardenedBuffer.h"
+#import "HardenedBuffer.h"
 
 #include <string.h>
 

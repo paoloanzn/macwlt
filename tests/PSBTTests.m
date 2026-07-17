@@ -6,7 +6,7 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/PSBT.h"
+#import "PSBT.h"
 
 @interface PSBTTests : MacwltTestCase
 @end

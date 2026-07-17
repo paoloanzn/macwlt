@@ -1,0 +1,11 @@
+{
+  "name": "@macwlt/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Objective-C wallet core and C ABI",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "make --directory=../.. core",
+    "test": "make --directory=../.. test"
+  }
+}

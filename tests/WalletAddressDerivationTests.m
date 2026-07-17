@@ -6,9 +6,9 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/Address.h"
-#import "../src/core/WalletAddressDerivation.h"
-#import "../src/core/WalletPublicKeyDerivation.h"
+#import "Address.h"
+#import "WalletAddressDerivation.h"
+#import "WalletPublicKeyDerivation.h"
 
 #include <string.h>
 #include <wally_bip32.h>

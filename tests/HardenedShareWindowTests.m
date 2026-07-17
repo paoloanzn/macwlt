@@ -6,7 +6,7 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/HardenedShareWindow.h"
+#import "HardenedShareWindow.h"
 
 #include <string.h>
 

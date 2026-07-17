@@ -6,7 +6,7 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/hex.h"
+#import "hex.h"
 
 #include <wally_bip39.h>
 #include <wally_core.h>

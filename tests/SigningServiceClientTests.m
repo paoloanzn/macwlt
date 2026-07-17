@@ -6,7 +6,7 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/SigningServiceClient.h"
+#import "SigningServiceClient.h"
 
 @interface SigningServiceClientTests : MacwltTestCase
 @property (nonatomic, strong) SigningServiceClient *sut;

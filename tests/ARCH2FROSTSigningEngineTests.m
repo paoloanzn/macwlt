@@ -6,11 +6,11 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/ARCH2FROSTLibrary.h"
-#import "../src/core/ARCH2FROSTSigningEngine.h"
-#import "../src/core/ARCH2FROSTWallet.h"
-#import "../src/core/HardenedBuffer.h"
-#import "../src/core/WalletPublicKeyDerivation.h"
+#import "ARCH2FROSTLibrary.h"
+#import "ARCH2FROSTSigningEngine.h"
+#import "ARCH2FROSTWallet.h"
+#import "HardenedBuffer.h"
+#import "WalletPublicKeyDerivation.h"
 
 #include <wally_core.h>
 #include <wally_crypto.h>

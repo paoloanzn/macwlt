@@ -6,11 +6,11 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/HardenedBuffer.h"
-#import "../src/core/HardenedShareWindow.h"
-#import "../src/core/WalletShareEnvelope.h"
-#import "../src/core/WalletSigner.h"
-#import "../src/core/WalletSigningEngine.h"
+#import "HardenedBuffer.h"
+#import "HardenedShareWindow.h"
+#import "WalletShareEnvelope.h"
+#import "WalletSigner.h"
+#import "WalletSigningEngine.h"
 
 #include <string.h>
 #include <wally_core.h>

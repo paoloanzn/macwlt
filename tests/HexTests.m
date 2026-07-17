@@ -6,7 +6,7 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/hex.h"
+#import "hex.h"
 
 @interface HexTests : MacwltTestCase
 @end

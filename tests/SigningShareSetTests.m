@@ -6,7 +6,7 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/SigningShareSet.h"
+#import "SigningShareSet.h"
 
 @interface SigningShareSetTests : MacwltTestCase
 @end

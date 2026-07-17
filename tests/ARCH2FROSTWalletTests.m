@@ -6,7 +6,7 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/ARCH2FROSTWallet.h"
+#import "ARCH2FROSTWallet.h"
 
 @interface ARCH2FROSTWalletTests : MacwltTestCase
 @end

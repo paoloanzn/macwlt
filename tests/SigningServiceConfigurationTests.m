@@ -29,7 +29,7 @@ static NSDictionary<NSString *, id> *MacwltTestPropertyListDictionaryAtPath(NSSt
 
 - (void)testBundleConfigurationDeclaresPrivateApplicationXPCService {
     NSDictionary<NSString *, id> *info =
-        MacwltTestPropertyListDictionaryAtPath(@"src/xpc/com.macwlt.SigningService-Info.plist");
+        MacwltTestPropertyListDictionaryAtPath(@"packages/xpc/src/com.macwlt.SigningService-Info.plist");
     NSDictionary<NSString *, id> *xpcService = info[@"XPCService"];
 
     XCTAssertEqualObjects(info[@"CFBundleIdentifier"], @"com.macwlt.SigningService");
@@ -40,7 +40,7 @@ static NSDictionary<NSString *, id> *MacwltTestPropertyListDictionaryAtPath(NSSt
 
 - (void)testEntitlementsKeepSigningServiceSandboxedAndOffline {
     NSDictionary<NSString *, id> *entitlements =
-        MacwltTestPropertyListDictionaryAtPath(@"src/xpc/signing-service.entitlements");
+        MacwltTestPropertyListDictionaryAtPath(@"packages/xpc/src/signing-service.entitlements");
     NSArray<NSString *> *accessGroups = entitlements[@"keychain-access-groups"];
 
     XCTAssertEqualObjects(entitlements[@"com.apple.security.app-sandbox"], @YES);

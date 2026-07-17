@@ -6,8 +6,8 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/SigningService.h"
-#import "../src/core/SigningServiceListenerDelegate.h"
+#import "SigningService.h"
+#import "SigningServiceListenerDelegate.h"
 
 @interface MockXPCConnection : NSObject
 @property (nonatomic, strong) NSXPCInterface *exportedInterface;

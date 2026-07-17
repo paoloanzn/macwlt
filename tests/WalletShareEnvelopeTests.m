@@ -6,7 +6,7 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/WalletShareEnvelope.h"
+#import "WalletShareEnvelope.h"
 
 @interface WalletShareEnvelopeTests : MacwltTestCase
 @end

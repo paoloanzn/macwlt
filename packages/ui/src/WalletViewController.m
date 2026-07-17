@@ -5,8 +5,8 @@
  */
 
 #import "WalletViewController.h"
-#import "../core/WalletService.h"
-#import "../core/hex.h"
+#import "WalletService.h"
+#import "hex.h"
 
 #define INPUT_PLACEHOLDER_STRING    "Message To Sign"
 #define OUTPUT_PLACEHOLDER_STRING   "bootstrapping ephemeral wallet..."

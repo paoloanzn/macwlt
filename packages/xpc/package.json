@@ -1,0 +1,13 @@
+{
+  "name": "@macwlt/xpc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Isolated XPC signing service",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "make --directory=../.. signing-service"
+  },
+  "dependencies": {
+    "@macwlt/core": "workspace:*"
+  }
+}

@@ -6,10 +6,10 @@
 
 #import "MacwltTestCase.h"
 
-#import "../src/core/SigningService.h"
-#import "../src/core/SigningServiceProtocol.h"
-#import "../src/core/WalletShareEnvelope.h"
-#import "../src/core/macwlt.h"
+#import "SigningService.h"
+#import "SigningServiceProtocol.h"
+#import "WalletShareEnvelope.h"
+#import "macwlt.h"
 
 @interface SigningBoundaryTests : MacwltTestCase
 @end

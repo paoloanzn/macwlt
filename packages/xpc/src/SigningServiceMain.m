@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#import "../core/SigningService.h"
-#import "../core/SigningServiceListenerDelegate.h"
+#import "SigningService.h"
+#import "SigningServiceListenerDelegate.h"
 
 #import <Foundation/Foundation.h>
 

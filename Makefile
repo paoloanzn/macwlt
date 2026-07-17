@@ -4,41 +4,40 @@
 TARGET ?= macwlt
 PREFIX ?= /usr/local
 
-ALL_SRC := $(shell find src -type f -name '*.m' | sort)
-CORE_SRC := $(shell find src/core -type f -name '*.m' | sort)
+CORE_SRC := $(shell find packages/core/src -type f -name '*.m' | sort)
 CLIENT_CORE_SRC := \
-	src/core/SigningServiceClient.m \
-	src/core/macwlt.m
+	packages/core/src/SigningServiceClient.m \
+	packages/core/src/macwlt.m
 APP_SRC := \
-	src/core/SigningServiceClient.m \
-	src/core/WalletService.m \
-	src/core/hex.m \
-	src/ui/WalletViewController.m \
-	src/ui/macwlt.m
-SIGNING_SERVICE_SRC := $(filter-out src/core/SigningServiceClient.m src/core/WalletService.m src/core/macwlt.m,$(filter-out src/ui/%,$(filter-out src/xpc/%,$(ALL_SRC)))) \
-	src/xpc/SigningServiceMain.m
-HEADERS := $(shell find src -type f -name '*.h' | sort)
+	packages/core/src/SigningServiceClient.m \
+	packages/core/src/WalletService.m \
+	packages/core/src/hex.m \
+	packages/ui/src/WalletViewController.m \
+	packages/ui/src/macwlt.m
+SIGNING_SERVICE_SRC := $(filter-out packages/core/src/SigningServiceClient.m packages/core/src/WalletService.m packages/core/src/macwlt.m,$(CORE_SRC)) \
+	packages/xpc/src/SigningServiceMain.m
+HEADERS := $(shell find packages/core/src packages/ui/src packages/xpc/src -type f -name '*.h' | sort)
 TEST_SRCS := $(shell find tests -type f -name '*.m' | sort)
 TEST_CORE_SRCS := \
-	src/core/ARCH2FROSTLibrary.m \
-	src/core/ARCH2FROSTSigningEngine.m \
-	src/core/ARCH2FROSTWallet.m \
-	src/core/Address.m \
-	src/core/HardenedBuffer.m \
-	src/core/HardenedShareWindow.m \
-	src/core/hex.m \
-	src/core/macwlt.m \
-	src/core/PSBT.m \
-	src/core/SEKeyManager.m \
-	src/core/SigningServiceClient.m \
-	src/core/SigningService.m \
-	src/core/SigningServiceListenerDelegate.m \
-	src/core/SigningShareSet.m \
-	src/core/WalletAddressDerivation.m \
-	src/core/WalletEnvelopeManager.m \
-	src/core/WalletPublicKeyDerivation.m \
-	src/core/WalletSigner.m \
-	src/core/WalletShareEnvelope.m
+	packages/core/src/ARCH2FROSTLibrary.m \
+	packages/core/src/ARCH2FROSTSigningEngine.m \
+	packages/core/src/ARCH2FROSTWallet.m \
+	packages/core/src/Address.m \
+	packages/core/src/HardenedBuffer.m \
+	packages/core/src/HardenedShareWindow.m \
+	packages/core/src/hex.m \
+	packages/core/src/macwlt.m \
+	packages/core/src/PSBT.m \
+	packages/core/src/SEKeyManager.m \
+	packages/core/src/SigningServiceClient.m \
+	packages/core/src/SigningService.m \
+	packages/core/src/SigningServiceListenerDelegate.m \
+	packages/core/src/SigningShareSet.m \
+	packages/core/src/WalletAddressDerivation.m \
+	packages/core/src/WalletEnvelopeManager.m \
+	packages/core/src/WalletPublicKeyDerivation.m \
+	packages/core/src/WalletSigner.m \
+	packages/core/src/WalletShareEnvelope.m
 BUILD_DIR := build
 BIN := $(BUILD_DIR)/$(TARGET)
 LIB := $(BUILD_DIR)/libmacwlt.dylib
@@ -49,13 +48,13 @@ TEST_INFO_PLIST := tests/MacwltCoreTests-Info.plist
 APP_BUNDLE_ID ?= com.macwlt.App
 APP_BUNDLE := $(BUILD_DIR)/macwlt.app
 APP_BUNDLE_BIN := $(APP_BUNDLE)/Contents/MacOS/$(TARGET)
-APP_INFO_PLIST := src/ui/macwlt-Info.plist
+APP_INFO_PLIST := packages/ui/src/macwlt-Info.plist
 SIGNING_SERVICE_BUNDLE_ID ?= com.macwlt.SigningService
 SIGNING_SERVICE_BUNDLE := $(BUILD_DIR)/$(SIGNING_SERVICE_BUNDLE_ID).xpc
 SIGNING_SERVICE_BIN := $(SIGNING_SERVICE_BUNDLE)/Contents/MacOS/$(SIGNING_SERVICE_BUNDLE_ID)
 APP_SIGNING_SERVICE_BUNDLE := $(APP_BUNDLE)/Contents/XPCServices/$(SIGNING_SERVICE_BUNDLE_ID).xpc
-SIGNING_SERVICE_INFO_PLIST := src/xpc/com.macwlt.SigningService-Info.plist
-SIGNING_SERVICE_ENTITLEMENTS ?= src/xpc/signing-service.entitlements
+SIGNING_SERVICE_INFO_PLIST := packages/xpc/src/com.macwlt.SigningService-Info.plist
+SIGNING_SERVICE_ENTITLEMENTS ?= packages/xpc/src/signing-service.entitlements
 FROST_DIR := vendor/secp256k1-frost
 FROST_SOURCE_DIR := $(BUILD_DIR)/secp256k1-frost-source
 FROST_BUILD_DIR := $(BUILD_DIR)/secp256k1-frost
@@ -87,6 +86,7 @@ CFLAGS ?= -fobjc-arc -Wall -Wextra
 LDFLAGS ?=
 CPPFLAGS += -DWALLY_ABI_NO_ELEMENTS \
 	-DENABLE_MODULE_FROST_BIP340_MODE \
+	-Ipackages/core/src \
 	-I$(FROST_DIR)/include \
 	-I$(WALLY_DIR)/include \
 	-I$(WALLY_DIR)/src/secp256k1/include \
@@ -105,6 +105,7 @@ XCTEST := $(DEVDIR)/usr/bin/xctest
 TEST_CPPFLAGS := -DWALLY_ABI_NO_ELEMENTS \
 	-DENABLE_MODULE_FROST_BIP340_MODE \
 	-I. \
+	-Ipackages/core/src \
 	-I$(FROST_DIR)/include \
 	-I$(WALLY_DIR)/include \
 	-I$(WALLY_DIR)/src/secp256k1/include \
@@ -126,9 +127,11 @@ TEST_LDFLAGS := -bundle -ObjC \
 	-Wl,-rpath,$(XCTEST_FRAMEWORKS)
 XCTEST_FILTER := $(if $(FILTER),-XCTest $(FILTER),)
 
-.PHONY: build test install clean submodules signing-service app-bundle
+.PHONY: build core test install clean submodules signing-service app-bundle
 
-build: $(BIN) $(LIB) signing-service app-bundle
+build: core signing-service app-bundle
+
+core: $(LIB)
 
 signing-service: $(SIGNING_SERVICE_BIN)
 
@@ -190,7 +193,7 @@ $(BIN): $(APP_SRC) $(HEADERS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) $(
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(APP_SRC) $(LDLIBS)
 	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS)) $@
 
-$(LIB): $(CLIENT_CORE_SRC) $(HEADERS) $(SIGNING_SERVICE_BIN)
+$(LIB): $(CLIENT_CORE_SRC) $(HEADERS)
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -I. $(CFLAGS) $(LDFLAGS) -dynamiclib -install_name @rpath/libmacwlt.dylib -o $@ $(CLIENT_CORE_SRC) -framework Foundation
 	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $@

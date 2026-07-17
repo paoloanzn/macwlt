@@ -7,7 +7,7 @@ export type CliResult = {
 };
 
 export const cliRoot = resolve(import.meta.dir, "..");
-export const repoRoot = resolve(cliRoot, "..");
+export const repoRoot = resolve(cliRoot, "../..");
 export const nativeLibraryPath = resolve(repoRoot, "build/libmacwlt.dylib");
 
 export function runCommand(args: readonly string[]): CliResult {
