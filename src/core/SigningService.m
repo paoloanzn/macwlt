@@ -6,11 +6,17 @@
 
 #import "SigningService.h"
 
+#import "ARCH2FROSTSigningEngine.h"
+#import "ARCH2FROSTWallet.h"
 #import "Address.h"
+#import "SEKeyManager.h"
+#import "WalletShareEnvelope.h"
 #import "WalletSigner.h"
 #import "WalletSigningEngine.h"
 
 #include "macwlt.h"
+
+#include <wally_psbt.h>
 
 NSString * const SigningServiceErrorDomain = @"macwlt.SigningService";
 
@@ -87,11 +93,31 @@ static NSError *signingServiceErrorForSignerError(NSError *error) {
     return signingServiceErrorWithMessage(serviceError, messageForNSError(error));
 }
 
+static BOOL psbtContainsTaprootKeyPath(NSData *data) {
+    struct wally_psbt *psbt = NULL;
+    int result = wally_psbt_from_bytes(data.bytes,
+                                       data.length,
+                                       WALLY_PSBT_PARSE_FLAG_STRICT,
+                                       &psbt);
+    if (result != WALLY_OK || !psbt) return NO;
+    BOOL containsTaproot = NO;
+    for (size_t index = 0; index < psbt->num_inputs; index++) {
+        if (psbt->inputs[index].taproot_leaf_paths.num_items > 0) {
+            containsTaproot = YES;
+            break;
+        }
+    }
+    wally_psbt_free(psbt);
+    return containsTaproot;
+}
+
 static BOOL signingServiceAddressTypeIsSupported(SigningServiceAddressType addressType) {
     switch (addressType) {
         case SigningServiceAddressTypeBitcoinP2WPKHMainnet:
         case SigningServiceAddressTypeBitcoinP2WPKHTestnet:
         case SigningServiceAddressTypeEthereum:
+        case SigningServiceAddressTypeBitcoinP2TRMainnet:
+        case SigningServiceAddressTypeBitcoinP2TRTestnet:
             return YES;
     }
     return NO;
@@ -106,6 +132,10 @@ static NSString *signingServiceAddressForPublicKey(NSData *publicKey,
             return p2wpkhAddress(publicKey, NO);
         case SigningServiceAddressTypeEthereum:
             return ethereumAddress(publicKey);
+        case SigningServiceAddressTypeBitcoinP2TRMainnet:
+            return p2trAddress(publicKey, YES);
+        case SigningServiceAddressTypeBitcoinP2TRTestnet:
+            return p2trAddress(publicKey, NO);
     }
     NSCAssert(NO, @"Unhandled signing service address type");
     return nil;
@@ -113,6 +143,7 @@ static NSString *signingServiceAddressForPublicKey(NSData *publicKey,
 
 @implementation SigningService {
     id<WalletSigningEngine> _signingEngine;
+    ARCH2FROSTSigningEngine *_frostSigningEngine;
 }
 
 - (nullable instancetype)initWithError:(NSError **)outError {
@@ -123,6 +154,12 @@ static NSString *signingServiceAddressForPublicKey(NSData *publicKey,
         _signingEngine = [[WalletSigner alloc] init];
     }
     return self;
+}
+
+- (nullable ARCH2FROSTSigningEngine *)frostSigningEngineWithError:(NSError **)outError {
+    if (_frostSigningEngine) return _frostSigningEngine;
+    _frostSigningEngine = [ARCH2FROSTSigningEngine engineWithError:outError];
+    return _frostSigningEngine;
 }
 
 - (void)bootstrapWalletWithReply:(SigningServiceBootstrapReply)reply {
@@ -139,16 +176,75 @@ static NSString *signingServiceAddressForPublicKey(NSData *publicKey,
     reply(publicKey, nil);
 }
 
+- (void)bootstrapFROSTWalletWithReply:(SigningServiceBootstrapReply)reply {
+    NSParameterAssert(reply);
+
+    NSError *error = nil;
+    ARCH2FROSTSigningEngine *engine = [self frostSigningEngineWithError:&error];
+    if (!engine) {
+        reply(nil, signingServiceErrorWithMessage(MACWLT_ERR_UNAVAILABLE,
+                                                  messageForNSError(error)));
+        return;
+    }
+    reply(engine.groupPublicKey, nil);
+}
+
+- (void)resetWalletWithReply:(SigningServiceResetReply)reply {
+    NSParameterAssert(reply);
+
+    _signingEngine = [[WalletSigner alloc] init];
+    _frostSigningEngine = nil;
+    NSArray<NSURL *> *storageURLs = @[
+        WalletShareEnvelope.defaultStorageURL,
+        ARCH2FROSTWallet.defaultStorageURL,
+    ];
+    NSError *error = nil;
+    for (NSURL *url in storageURLs) {
+        if ([NSFileManager.defaultManager fileExistsAtPath:url.path] &&
+            ![NSFileManager.defaultManager removeItemAtURL:url error:&error]) {
+            reply(NO, signingServiceErrorWithMessage(MACWLT_ERR_UNAVAILABLE,
+                                                      messageForNSError(error)));
+            return;
+        }
+    }
+    if (![SEKeyManager deleteAllManagedKeysWithError:&error]) {
+        reply(NO, signingServiceErrorWithMessage(MACWLT_ERR_UNAVAILABLE,
+                                                  messageForNSError(error)));
+        return;
+    }
+    reply(YES, nil);
+}
+
 - (void)signPSBT:(NSData *)psbt withReply:(SigningServicePSBTReply)reply {
     NSParameterAssert(reply);
 
     NSError *error = nil;
-    NSData *signedPSBT = [_signingEngine signedPSBTForData:psbt error:&error];
+    BOOL usesFROST = psbtContainsTaprootKeyPath(psbt);
+    NSData *signedPSBT = usesFROST
+        ? [[self frostSigningEngineWithError:&error]
+            signedTaprootPSBT:psbt error:&error]
+        : [_signingEngine signedPSBTForData:psbt error:&error];
     if (!signedPSBT) {
-        reply(nil, signingServiceErrorForSignerError(error));
+        macwlt_err_t code = usesFROST
+            ? MACWLT_ERR_SIGNING_FAILED : errorForSignerError(error);
+        reply(nil, signingServiceErrorWithMessage(code, messageForNSError(error)));
         return;
     }
     reply(signedPSBT, nil);
+}
+
+- (void)signDigest:(NSData *)digest withReply:(SigningServiceSignatureReply)reply {
+    NSParameterAssert(reply);
+
+    NSError *error = nil;
+    ARCH2FROSTSigningEngine *engine = [self frostSigningEngineWithError:&error];
+    NSData *signature = [engine signDigest:digest error:&error];
+    if (!signature) {
+        reply(nil, signingServiceErrorWithMessage(MACWLT_ERR_SIGNING_FAILED,
+                                                  messageForNSError(error)));
+        return;
+    }
+    reply(signature, nil);
 }
 
 - (void)signEthTx:(NSData *)transaction withReply:(SigningServiceSignatureReply)reply {
@@ -169,10 +265,16 @@ static NSString *signingServiceAddressForPublicKey(NSData *publicKey,
     NSParameterAssert(reply);
 
     NSError *error = nil;
-    NSData *publicKey = [_signingEngine publicKeyForDerivationPath:derivationPath
-                                                             error:&error];
+    BOOL usesFROST = [derivationPath isEqualToString:@"m/86"] ||
+        [derivationPath hasPrefix:@"m/86/"];
+    NSData *publicKey = usesFROST
+        ? [[self frostSigningEngineWithError:&error]
+            publicKeyForDerivationPath:derivationPath error:&error]
+        : [_signingEngine publicKeyForDerivationPath:derivationPath error:&error];
     if (!publicKey) {
-        reply(nil, signingServiceErrorForSignerError(error));
+        macwlt_err_t code = usesFROST
+            ? MACWLT_ERR_UNAVAILABLE : errorForSignerError(error);
+        reply(nil, signingServiceErrorWithMessage(code, messageForNSError(error)));
         return;
     }
     reply(publicKey, nil);
@@ -189,10 +291,17 @@ static NSString *signingServiceAddressForPublicKey(NSData *publicKey,
     }
 
     NSError *error = nil;
-    NSData *publicKey = [_signingEngine publicKeyForDerivationPath:derivationPath
-                                                             error:&error];
+    BOOL usesFROST = addressType == SigningServiceAddressTypeBitcoinP2TRMainnet ||
+        addressType == SigningServiceAddressTypeBitcoinP2TRTestnet;
+    ARCH2FROSTSigningEngine *frostEngine = usesFROST
+        ? [self frostSigningEngineWithError:&error] : nil;
+    NSData *publicKey = usesFROST
+        ? [frostEngine publicKeyForDerivationPath:derivationPath error:&error]
+        : [_signingEngine publicKeyForDerivationPath:derivationPath error:&error];
     if (!publicKey) {
-        reply(nil, signingServiceErrorForSignerError(error));
+        macwlt_err_t code = usesFROST
+            ? MACWLT_ERR_UNAVAILABLE : errorForSignerError(error);
+        reply(nil, signingServiceErrorWithMessage(code, messageForNSError(error)));
         return;
     }
 

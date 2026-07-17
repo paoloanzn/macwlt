@@ -14,6 +14,7 @@ typedef NS_ENUM(NSInteger, HardenedBufferErrorCode) {
     HardenedBufferErrorInvalidLength = 1,
     HardenedBufferErrorPageSizeUnavailable,
     HardenedBufferErrorAllocationFailed,
+    HardenedBufferErrorLockFailed,
     HardenedBufferErrorProtectionFailed,
 };
 

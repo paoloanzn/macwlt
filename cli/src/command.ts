@@ -194,7 +194,11 @@ function parseAddress(args: readonly string[]): Result<Command, string> {
   if (!flags.ok) return flags;
   if (flags.value.positionals.length > 1) return err("address accepts at most one derivation path");
   const type = flags.value.options.get("type");
-  if (!isAddressType(type)) return err("address requires --type bitcoin|bitcoin-testnet|ethereum");
+  if (!isAddressType(type)) {
+    return err(
+      "address requires --type bitcoin|bitcoin-testnet|bitcoin-taproot|bitcoin-taproot-testnet|ethereum",
+    );
+  }
   return ok({ kind: "address", derivationPath: flags.value.positionals[0] ?? "m", addressType: type, json: flags.value.json });
 }
 
@@ -302,7 +306,11 @@ async function readInput(input: BytesInput): Promise<Result<Uint8Array, string>>
 }
 
 function isAddressType(value: string | undefined): value is AddressType {
-  return value === "bitcoin" || value === "bitcoin-testnet" || value === "ethereum";
+  return value === "bitcoin"
+    || value === "bitcoin-testnet"
+    || value === "bitcoin-taproot"
+    || value === "bitcoin-taproot-testnet"
+    || value === "ethereum";
 }
 
 function isPsbtOutputFormat(value: string): value is PsbtOutputFormat {
@@ -352,7 +360,7 @@ function helpText(): string {
     "  macwlt create [--reset] [--json]",
     "  macwlt reset --yes [--json]",
     "  macwlt pubkey [path] [--json]",
-    "  macwlt address [path] --type bitcoin|bitcoin-testnet|ethereum [--json]",
+    "  macwlt address [path] --type bitcoin|bitcoin-testnet|bitcoin-taproot|bitcoin-taproot-testnet|ethereum [--json]",
     "  macwlt sign-eth --hex <typed-transaction-preimage-hex> [--json]",
     formatPsbtHelp(),
     "  macwlt version",

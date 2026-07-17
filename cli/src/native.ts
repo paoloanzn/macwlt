@@ -19,7 +19,12 @@ const nativeSymbols = {
   macwlt_export_address: { args: ["ptr", "cstring", "int", "ptr", "ptr"], returns: "int" },
 } as const;
 
-export type AddressType = "bitcoin" | "bitcoin-testnet" | "ethereum";
+export type AddressType =
+  | "bitcoin"
+  | "bitcoin-testnet"
+  | "bitcoin-taproot"
+  | "bitcoin-taproot-testnet"
+  | "ethereum";
 
 export type NativeError =
   | { readonly kind: "load"; readonly libraryPath: string; readonly message: string }
@@ -191,6 +196,10 @@ function nativeAddressType(addressType: AddressType): number {
       return 2;
     case "ethereum":
       return 3;
+    case "bitcoin-taproot":
+      return 4;
+    case "bitcoin-taproot-testnet":
+      return 5;
   }
 }
 

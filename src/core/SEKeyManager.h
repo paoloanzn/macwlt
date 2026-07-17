@@ -13,6 +13,8 @@ typedef NS_ENUM(NSInteger, SEKeyPurpose) {
     SEKeyPurposeLegacyEnvelope = 0,
     SEKeyPurposeSigningShareA,
     SEKeyPurposeSigningShareB,
+    SEKeyPurposeARCH2ShareA,
+    SEKeyPurposeARCH2ShareB,
 };
 
 @interface SEKeyManager : NSObject

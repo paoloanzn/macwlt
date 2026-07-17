@@ -61,6 +61,18 @@ static SEKeyPurposeConfig configForPurpose(SEKeyPurpose purpose) {
                 @"se-token-B.blob",
                 kSecAccessControlPrivateKeyUsage | kSecAccessControlBiometryCurrentSet,
             };
+        case SEKeyPurposeARCH2ShareA:
+            return (SEKeyPurposeConfig){
+                "app.macwlt.arch2-signing-share-a.v1",
+                @"se-token-arch2-A.blob",
+                kSecAccessControlPrivateKeyUsage | kSecAccessControlBiometryCurrentSet,
+            };
+        case SEKeyPurposeARCH2ShareB:
+            return (SEKeyPurposeConfig){
+                "app.macwlt.arch2-signing-share-b.v1",
+                @"se-token-arch2-B.blob",
+                kSecAccessControlPrivateKeyUsage | kSecAccessControlBiometryCurrentSet,
+            };
     }
     NSCAssert(NO, @"Unhandled Secure Enclave key purpose");
     return (SEKeyPurposeConfig){
@@ -305,6 +317,8 @@ static BOOL probeSecureEnclaveAvailability(void) {
         SEKeyPurposeLegacyEnvelope,
         SEKeyPurposeSigningShareA,
         SEKeyPurposeSigningShareB,
+        SEKeyPurposeARCH2ShareA,
+        SEKeyPurposeARCH2ShareB,
     };
     for (NSUInteger index = 0; index < sizeof(purposes) / sizeof(purposes[0]); index++) {
         OSStatus status = SecItemDelete((__bridge CFDictionaryRef)keychainQueryForPurpose(purposes[index], NO));

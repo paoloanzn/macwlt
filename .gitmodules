@@ -4,3 +4,7 @@
 [submodule "vendor/XKCP"]
 	path = vendor/XKCP
 	url = https://github.com/XKCP/XKCP.git
+[submodule "vendor/secp256k1-frost"]
+	path = vendor/secp256k1-frost
+	url = https://github.com/bancaditalia/secp256k1-frost.git
+	branch = frost

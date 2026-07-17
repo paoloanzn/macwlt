@@ -11,7 +11,13 @@ export const pubkeyOutputSchema = z.object({
 export const addressOutputSchema = z.object({
   address: z.string().min(1),
   derivationPath: z.string(),
-  type: z.enum(["bitcoin", "bitcoin-testnet", "ethereum"]),
+  type: z.enum([
+    "bitcoin",
+    "bitcoin-testnet",
+    "bitcoin-taproot",
+    "bitcoin-taproot-testnet",
+    "ethereum",
+  ]),
 });
 
 export const ethSignatureOutputSchema = z.object({

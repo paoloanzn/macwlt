@@ -14,6 +14,7 @@
 #include <wally_address.h>
 #include <wally_core.h>
 #include <wally_crypto.h>
+#include <wally_script.h>
 
 enum {
     kCompressedPubKeyLen = 33,
@@ -105,6 +106,45 @@ NSString *p2wpkhAddress(NSData *compressedPubKey, BOOL mainnet) {
         return nil;
     }
 
+    NSString *address = [NSString stringWithUTF8String:out];
+    wally_free_string(out);
+    return address;
+}
+
+NSString *p2trAddress(NSData *compressedInternalPublicKey, BOOL mainnet) {
+    if (compressedInternalPublicKey.length != EC_PUBLIC_KEY_LEN) return nil;
+    if (!ensureWallyInitialized()) return nil;
+
+    uint8_t outputPublicKey[EC_PUBLIC_KEY_LEN];
+    if (wally_ec_public_key_bip341_tweak(compressedInternalPublicKey.bytes,
+                                         compressedInternalPublicKey.length,
+                                         NULL,
+                                         0,
+                                         0,
+                                         outputPublicKey,
+                                         sizeof(outputPublicKey)) != WALLY_OK) {
+        return nil;
+    }
+
+    uint8_t script[WALLY_SCRIPTPUBKEY_P2TR_LEN];
+    size_t written = 0;
+    if (wally_scriptpubkey_p2tr_from_bytes(outputPublicKey + 1,
+                                           EC_XONLY_PUBLIC_KEY_LEN,
+                                           0,
+                                           script,
+                                           sizeof(script),
+                                           &written) != WALLY_OK ||
+        written != sizeof(script)) {
+        return nil;
+    }
+
+    char *out = NULL;
+    const char *hrp = mainnet ? "bc" : "tb";
+    if (wally_addr_segwit_from_bytes(script, sizeof(script),
+                                     hrp, 0, &out) != WALLY_OK ||
+        !out) {
+        return nil;
+    }
     NSString *address = [NSString stringWithUTF8String:out];
     wally_free_string(out);
     return address;

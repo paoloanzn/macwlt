@@ -37,4 +37,17 @@
     XCTAssertEqualObjects(address, @"0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf");
 }
 
+- (void)testMainnetP2TRAddressUsesOneBIP341Tweak {
+    NSData *compressedInternalPublicKey = MacwltTestDataFromHex(
+        @"0279be667ef9dcbbac55a06295ce870b07"
+        @"029bfcdb2dce28d959f2815b16f81798"
+    );
+
+    NSString *address = p2trAddress(compressedInternalPublicKey, YES);
+
+    XCTAssertEqualObjects(address,
+                          @"bc1pmfr3p9j00pfxjh0zmgp99y8zftmd3s5p"
+                          @"medqhyptwy6lm87hf5sspknck9");
+}
+
 @end

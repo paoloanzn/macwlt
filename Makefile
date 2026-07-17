@@ -5,13 +5,24 @@ TARGET ?= macwlt
 PREFIX ?= /usr/local
 
 ALL_SRC := $(shell find src -type f -name '*.m' | sort)
-APP_SRC := $(filter-out src/xpc/%,$(ALL_SRC))
 CORE_SRC := $(shell find src/core -type f -name '*.m' | sort)
-SIGNING_SERVICE_SRC := $(filter-out src/core/SigningServiceClient.m,$(filter-out src/ui/%,$(filter-out src/xpc/%,$(ALL_SRC)))) \
+CLIENT_CORE_SRC := \
+	src/core/SigningServiceClient.m \
+	src/core/macwlt.m
+APP_SRC := \
+	src/core/SigningServiceClient.m \
+	src/core/WalletService.m \
+	src/core/hex.m \
+	src/ui/WalletViewController.m \
+	src/ui/macwlt.m
+SIGNING_SERVICE_SRC := $(filter-out src/core/SigningServiceClient.m src/core/WalletService.m src/core/macwlt.m,$(filter-out src/ui/%,$(filter-out src/xpc/%,$(ALL_SRC)))) \
 	src/xpc/SigningServiceMain.m
 HEADERS := $(shell find src -type f -name '*.h' | sort)
 TEST_SRCS := $(shell find tests -type f -name '*.m' | sort)
 TEST_CORE_SRCS := \
+	src/core/ARCH2FROSTLibrary.m \
+	src/core/ARCH2FROSTSigningEngine.m \
+	src/core/ARCH2FROSTWallet.m \
 	src/core/Address.m \
 	src/core/HardenedBuffer.m \
 	src/core/HardenedShareWindow.m \
@@ -45,6 +56,14 @@ SIGNING_SERVICE_BIN := $(SIGNING_SERVICE_BUNDLE)/Contents/MacOS/$(SIGNING_SERVIC
 APP_SIGNING_SERVICE_BUNDLE := $(APP_BUNDLE)/Contents/XPCServices/$(SIGNING_SERVICE_BUNDLE_ID).xpc
 SIGNING_SERVICE_INFO_PLIST := src/xpc/com.macwlt.SigningService-Info.plist
 SIGNING_SERVICE_ENTITLEMENTS ?= src/xpc/signing-service.entitlements
+FROST_DIR := vendor/secp256k1-frost
+FROST_SOURCE_DIR := $(BUILD_DIR)/secp256k1-frost-source
+FROST_BUILD_DIR := $(BUILD_DIR)/secp256k1-frost
+FROST_PATCH := patches/secp256k1-frost-secret-memory.patch
+FROST_DYLIB := $(FROST_BUILD_DIR)/lib/libsecp256k1.6.dylib
+FROST_BUILD_STAMP := $(FROST_BUILD_DIR)/.built
+SIGNING_SERVICE_FRAMEWORKS := $(SIGNING_SERVICE_BUNDLE)/Contents/Frameworks
+SIGNING_SERVICE_FROST_DYLIB := $(SIGNING_SERVICE_FRAMEWORKS)/libsecp256k1.6.dylib
 WALLY_DIR := vendor/libwally-core
 WALLY_BUILD_DIR := $(BUILD_DIR)/libwally-core
 WALLY_CONFIGURE := $(WALLY_DIR)/configure
@@ -67,6 +86,8 @@ CPPFLAGS ?=
 CFLAGS ?= -fobjc-arc -Wall -Wextra
 LDFLAGS ?=
 CPPFLAGS += -DWALLY_ABI_NO_ELEMENTS \
+	-DENABLE_MODULE_FROST_BIP340_MODE \
+	-I$(FROST_DIR)/include \
 	-I$(WALLY_DIR)/include \
 	-I$(WALLY_DIR)/src/secp256k1/include \
 	-I$(XKCP_DIR)/bin/.build/$(XKCP_TARGET)/libXKCP.a \
@@ -82,7 +103,9 @@ XCTEST_PLATFORM := $(DEVDIR)/Platforms/MacOSX.platform/Developer
 XCTEST_FRAMEWORKS := $(XCTEST_PLATFORM)/Library/Frameworks
 XCTEST := $(DEVDIR)/usr/bin/xctest
 TEST_CPPFLAGS := -DWALLY_ABI_NO_ELEMENTS \
+	-DENABLE_MODULE_FROST_BIP340_MODE \
 	-I. \
+	-I$(FROST_DIR)/include \
 	-I$(WALLY_DIR)/include \
 	-I$(WALLY_DIR)/src/secp256k1/include \
 	-I$(XKCP_DIR)/bin/.build/$(XKCP_TARGET)/libXKCP.a \
@@ -139,21 +162,44 @@ $(WALLY_LIB) $(WALLY_SECP256K1_LIB): $(WALLY_BUILD_STAMP)
 $(XKCP_LIB):
 	$(MAKE) -C $(XKCP_DIR) $(XKCP_TARGET)/libXKCP.a
 
+$(FROST_BUILD_STAMP): $(FROST_PATCH) $(shell find $(FROST_DIR) -type f)
+	rm -rf $(FROST_SOURCE_DIR) $(FROST_BUILD_DIR)
+	mkdir -p $(FROST_SOURCE_DIR)
+	rsync -a --exclude .git/ $(FROST_DIR)/ $(FROST_SOURCE_DIR)/
+	patch -d $(FROST_SOURCE_DIR) -p1 < $(abspath $(FROST_PATCH))
+	cmake -S $(FROST_SOURCE_DIR) -B $(FROST_BUILD_DIR) \
+		-DSECP256K1_ENABLE_MODULE_FROST=ON \
+		-DSECP256K1_ENABLE_MODULE_FROST_BIP340_MODE=ON \
+		-DSECP256K1_EXPERIMENTAL=ON \
+		-DSECP256K1_BUILD_TESTS=OFF \
+		-DSECP256K1_BUILD_EXHAUSTIVE_TESTS=OFF \
+		-DSECP256K1_BUILD_BENCHMARK=OFF \
+		-DSECP256K1_BUILD_EXAMPLES=OFF \
+		-DBUILD_SHARED_LIBS=ON
+	cmake --build $(FROST_BUILD_DIR)
+	touch $@
+
+$(FROST_DYLIB): $(FROST_BUILD_STAMP)
+
+$(SIGNING_SERVICE_FROST_DYLIB): $(FROST_DYLIB)
+	mkdir -p $(SIGNING_SERVICE_FRAMEWORKS)
+	cp $(FROST_DYLIB) $@
+
 $(BIN): $(APP_SRC) $(HEADERS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) $(ENTITLEMENTS)
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(APP_SRC) $(LDLIBS)
 	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS)) $@
 
-$(LIB): $(CORE_SRC) $(HEADERS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB)
+$(LIB): $(CLIENT_CORE_SRC) $(HEADERS) $(SIGNING_SERVICE_BIN)
 	@mkdir -p $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -dynamiclib -install_name @rpath/libmacwlt.dylib -o $@ $(CORE_SRC) $(LDLIBS)
+	$(CC) -I. $(CFLAGS) $(LDFLAGS) -dynamiclib -install_name @rpath/libmacwlt.dylib -o $@ $(CLIENT_CORE_SRC) -framework Foundation
 	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $@
 
-$(SIGNING_SERVICE_BIN): $(SIGNING_SERVICE_SRC) $(HEADERS) $(SIGNING_SERVICE_INFO_PLIST) $(SIGNING_SERVICE_ENTITLEMENTS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB)
+$(SIGNING_SERVICE_BIN): $(SIGNING_SERVICE_SRC) $(HEADERS) $(SIGNING_SERVICE_INFO_PLIST) $(SIGNING_SERVICE_ENTITLEMENTS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) $(SIGNING_SERVICE_FROST_DYLIB)
 	@mkdir -p $(SIGNING_SERVICE_BUNDLE)/Contents/MacOS
 	cp $(SIGNING_SERVICE_INFO_PLIST) $(SIGNING_SERVICE_BUNDLE)/Contents/Info.plist
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(SIGNING_SERVICE_SRC) $(LDLIBS)
-	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(if $(SIGNING_SERVICE_ENTITLEMENTS),--entitlements $(SIGNING_SERVICE_ENTITLEMENTS)) $(SIGNING_SERVICE_BUNDLE)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -Wl,-rpath,@executable_path/../Frameworks -o $@ $(SIGNING_SERVICE_SRC) $(LDLIBS)
+	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(if $(filter-out -,$(CODESIGN_IDENTITY)),--entitlements $(SIGNING_SERVICE_ENTITLEMENTS)) $(SIGNING_SERVICE_BUNDLE)
 
 $(APP_BUNDLE_BIN): $(BIN) $(APP_INFO_PLIST)
 	@mkdir -p $(APP_BUNDLE)/Contents/MacOS
@@ -165,7 +211,7 @@ $(APP_SIGNING_SERVICE_BUNDLE): $(SIGNING_SERVICE_BIN) $(APP_BUNDLE_BIN)
 	ditto $(SIGNING_SERVICE_BUNDLE) $@
 	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(APP_BUNDLE)
 
-$(TEST_BIN): $(TEST_SRCS) $(TEST_CORE_SRCS) $(HEADERS) $(TEST_INFO_PLIST) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB)
+$(TEST_BIN): $(TEST_SRCS) $(TEST_CORE_SRCS) $(HEADERS) $(TEST_INFO_PLIST) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) $(FROST_DYLIB)
 	@mkdir -p $(dir $@)
 	cp $(TEST_INFO_PLIST) $(TEST_BUNDLE)/Contents/Info.plist
 	$(CC) $(TEST_CPPFLAGS) $(TEST_CFLAGS) $(TEST_LDFLAGS) $(LDFLAGS) -o $@ $(TEST_SRCS) $(TEST_CORE_SRCS) $(LDLIBS)

@@ -6,19 +6,16 @@
 
 #import "WalletService.h"
 
-#import "SEKeyManager.h"
-#import "WalletEnvelopeManager.h"
+#import "SigningServiceClient.h"
 
 #import <dispatch/dispatch.h>
-#import <Security/Security.h>
 #import <wally_core.h>
 #import <wally_crypto.h>
 
 #define WALLET_SERVICE_ERROR_DOMAIN "app.macwlt.wallet-service.v1"
 
 typedef NS_ENUM(NSInteger, WalletServiceErrorCode) {
-    WalletServiceErrorMissingPublicKey = 1,
-    WalletServiceErrorInvalidMessageEncoding,
+    WalletServiceErrorInvalidMessageEncoding = 1,
     WalletServiceErrorHashFailed,
 };
 
@@ -43,39 +40,30 @@ static BOOL ensureWallyInitialized(void) {
     return initialized;
 }
 
-@implementation WalletService
+@implementation WalletService {
+    SigningServiceClient *_client;
+}
 
 - (instancetype)init {
     self = [super init];
+    if (self) {
+        _client = [SigningServiceClient clientWithDefaultService];
+    }
     return self;
 }
 
 - (nullable NSData *)bootstrapWalletWithError:(NSError **)outError {
-    NSError *error = nil;
-    SecKeyRef key = [SEKeyManager copyKeyWithError:&error];
-    if (!key) {
-        if (outError) *outError = error;
-        return nil;
-    }
-
-    SecKeyRef publicKey = SecKeyCopyPublicKey(key);
-    if (!publicKey) {
-        CFRelease(key);
-        setWalletServiceError(outError,
-                              WalletServiceErrorMissingPublicKey,
-                              @"Could not copy Secure Enclave public key");
-        return nil;
-    }
-
-    NSData *envelope = [WalletEnvelopeManager walletBootstrap:publicKey error:&error];
-    CFRelease(publicKey);
-    CFRelease(key);
-
-    if (!envelope) {
-        if (outError) *outError = error;
-        return nil;
-    }
-    return envelope;
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+    __block NSData *publicKey = nil;
+    __block NSError *operationError = nil;
+    [_client bootstrapFROSTWalletWithReply:^(NSData *value, NSError *error) {
+        publicKey = value;
+        operationError = error;
+        dispatch_semaphore_signal(semaphore);
+    }];
+    dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+    if (!publicKey && outError) *outError = operationError;
+    return publicKey;
 }
 
 - (nullable NSData *)signatureForMessage:(NSString *)message
@@ -98,25 +86,19 @@ static BOOL ensureWallyInitialized(void) {
                               @"Could not hash message with SHA-256");
         return nil;
     }
+
+    (void)envelope;
     NSData *digestData = [NSData dataWithBytes:digest length:sizeof(digest)];
-
-    NSError *error = nil;
-    SecKeyRef key = [SEKeyManager copyKeyWithError:&error];
-    if (!key) {
-        if (outError) *outError = error;
-        return nil;
-    }
-
-    NSData *signature = [WalletEnvelopeManager signWithSecp256k1:digestData
-                                                        envelope:envelope
-                                                             key:key
-                                                           error:&error];
-    CFRelease(key);
-
-    if (!signature) {
-        if (outError) *outError = error;
-        return nil;
-    }
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+    __block NSData *signature = nil;
+    __block NSError *operationError = nil;
+    [_client signDigest:digestData withReply:^(NSData *value, NSError *error) {
+        signature = value;
+        operationError = error;
+        dispatch_semaphore_signal(semaphore);
+    }];
+    dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+    if (!signature && outError) *outError = operationError;
     return signature;
 }
 

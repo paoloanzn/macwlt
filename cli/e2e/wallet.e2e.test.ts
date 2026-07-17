@@ -40,6 +40,15 @@ if (process.env.MACWLT_E2E !== "1") {
       expect(ethereumAddress.address).toMatch(/^0x[0-9A-Fa-f]{40}$/);
     }, 30_000);
 
+    test("exports FROST-backed taproot addresses", () => {
+      const taprootAddress = addressOutputSchema.parse(
+        jsonCommand(["address", "m/86/0/0/0/0", "--type", "bitcoin-taproot", "--json"]),
+      );
+
+      expect(taprootAddress.type).toBe("bitcoin-taproot");
+      expect(taprootAddress.address).toMatch(/^bc1p[0-9a-z]+$/);
+    }, 60_000);
+
     test("signs ethereum transaction preimages", () => {
       const ethSignature = ethSignatureOutputSchema.parse(jsonCommand(["sign-eth", "--hex", "01020304", "--json"]));
       expect(ethSignature.signature.endsWith("00") || ethSignature.signature.endsWith("01")).toBe(true);

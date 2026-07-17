@@ -88,10 +88,20 @@ static NSUInteger roundUpToPage(NSUInteger length, NSUInteger page) {
     }
 
     secureWipe(base, allocatedLength);
-    BOOL locked = mlock(base, allocatedLength) == 0;
+    if (mlock(base, allocatedLength) != 0) {
+        int savedErrno = errno;
+        secureWipe(base, allocatedLength);
+        munmap(base, allocatedLength);
+        errno = savedErrno;
+        setErrnoError(outError,
+                      HardenedBufferErrorLockFailed,
+                      @"mlock");
+        return nil;
+    }
+
     if (mprotect(base, allocatedLength, PROT_NONE) != 0) {
         int savedErrno = errno;
-        if (locked) munlock(base, allocatedLength);
+        munlock(base, allocatedLength);
         munmap(base, allocatedLength);
         errno = savedErrno;
         setErrnoError(outError,
@@ -105,12 +115,12 @@ static NSUInteger roundUpToPage(NSUInteger length, NSUInteger page) {
         _base = base;
         _allocatedLength = allocatedLength;
         _length = length;
-        _memoryLocked = locked;
+        _memoryLocked = YES;
         _state = HardenedBufferStateMasked;
     } else {
         mprotect(base, allocatedLength, PROT_READ | PROT_WRITE);
         secureWipe(base, allocatedLength);
-        if (locked) munlock(base, allocatedLength);
+        munlock(base, allocatedLength);
         munmap(base, allocatedLength);
     }
     return self;

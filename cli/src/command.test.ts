@@ -23,4 +23,15 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("reset requires --yes");
   });
+
+  test("accepts taproot address types before loading native code", async () => {
+    const result = await runCli(
+      ["address", "m/86/0/0/0/0", "--type", "bitcoin-taproot"],
+      { MACWLT_LIB: "/missing/libmacwlt.dylib" },
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("native library not found");
+    expect(result.stderr).not.toContain("address requires --type");
+  });
 });

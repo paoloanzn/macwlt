@@ -31,6 +31,7 @@
 
 - (void)testMaskingProtectsMemoryFromReads {
     XCTAssertEqual(self.sut.length, 32);
+    XCTAssertTrue(self.sut.memoryLocked);
     XCTAssertEqual(self.sut.state, HardenedBufferStateMasked);
 
     NSError *error = nil;
