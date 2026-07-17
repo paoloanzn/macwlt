@@ -1,8 +1,9 @@
 # TESTS.md
 
-Objective-C testing guidelines. Companion to `AGENTS.md` — that file covers writing
-production code, this one covers proving it works. Follow when writing or modifying
-anything under `tests/`.
+Objective-C testing guidelines. Companion to the
+[core Objective-C coding practices](../packages/core/CLAUDE.md) — that guide covers
+writing production code, this one covers proving it works. Follow when writing or
+modifying anything under `tests/`.
 
 Build: clang + Makefile on macOS. There is no `.xcodeproj`. XCTest is available anyway
 — it ships in the Xcode toolchain, not the project format — but every convenience
@@ -125,7 +126,7 @@ Add a message wherever the failure would be ambiguous:
 XCTAssertEqual(results.count, 3, @"expected 3 results for query %@, got %@", query, results);
 ```
 
-## Testing the contracts AGENTS.md requires
+## Testing the core coding contracts
 
 ### Preconditions
 
@@ -270,10 +271,11 @@ For callback-based APIs, use an expectation:
 }
 ```
 
-For code guarded by a private serial queue (see AGENTS.md § Concurrency), don't use an
-expectation — use a **fence**. An empty `dispatch_sync` returns once everything queued
-before it has drained. Deterministic, unlike a timeout. Prefer it wherever the
-concurrency is queue-based.
+For code guarded by a private serial queue (see
+[Concurrency](../packages/core/CLAUDE.md#concurrency)), don't use an expectation — use
+a **fence**. An empty `dispatch_sync` returns once everything queued before it has
+drained. Deterministic, unlike a timeout. Prefer it wherever the concurrency is
+queue-based.
 
 ```objc
 // Cache+Testing.h — exposed to tests only
