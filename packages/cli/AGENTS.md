@@ -109,6 +109,76 @@ TypeScript conventions for this project. Rules are normative: **MUST** = enforce
 - **MUST** avoid folder/file stutter: `config/loader.ts`, not `config/configLoader.ts`.
 - **MUST** colocate tests with a matching name: `planner.ts` → `planner.test.ts`.
 
+## CLI commands
+
+The CLI is a registry of self-contained `Command<P>` objects. Each command
+lives in its own file under `src/commands/`; `src/commands.ts` is the *only*
+place that knows the full list. `runCli` (in `src/command.ts`) is a pure
+dispatcher: it takes `args` + `env` + an optional registry and returns a
+`CliResult`. Do not introduce a class, a global mutable singleton, or
+side-effecting self-registration — see "Classes" and "Dependency injection"
+above. A `Command` is a plain object, not an instance.
+
+- **MUST** implement every new user-facing verb as a `Command<P>` in
+  `src/commands/<verb>.ts`, exporting a `<verb>Command` constant plus a pure
+  `<verb>Args` type and a `parse<Verb>` function.
+  ```ts
+  export type SignEthArgs = { readonly input: BytesInput; readonly json: boolean };
+
+  export const signEthCommand: Command<SignEthArgs> = {
+    name: "sign-eth",
+    describe(): string { return "  macwlt sign-eth --hex <preimage> [--json]"; },
+    parse: parseSignEth,
+    async run(ctx, args): Promise<Result<string, string>> { /* ... */ },
+  };
+  ```
+- **MUST** register a new command by adding it to the `commands` array in
+    `src/commands.ts`. Do **not** add command modules to `index.ts`, do **not**
+    self-register on import, and do **not** mutate the registry at runtime.
+- **MUST** keep `parse` pure and synchronous: it takes the arg tail (after the
+  command name) and returns `Result<P, string>`. It **MUST NOT** touch the
+  native client, the filesystem, or the network. Parser-level failures (bad
+  flags, missing `--type`, missing `--yes`) must surface here so unit tests can
+  exercise them without loading `libmacwlt.dylib` — see the existing tests in
+  `command.test.ts` that run against a missing library path.
+- **MUST** do all FFI/IO inside `run`, never inside `parse`. `run` receives a
+  `CommandContext` (`env`, `client`, `registry`) and the already-parsed args.
+- **MUST** declare `needsClient: false` on commands that never touch the
+  native wallet (`help`, `version`). The dispatcher then skips library loading
+  for them, which keeps `macwlt help` working on a machine without the dylib.
+- **MUST** return `Result<string, string>` from `run`: the ok value is the
+  stdout body, the error value is the stderr body. Do not write to
+  `process.stdout` directly; the dispatcher appends the trailing newline.
+- **MUST** honor `--json` uniformly: when set, emit a JSON object with stable
+  keys; when unset, emit the human form. Use `formatDataOutput` from
+  `src/walletOutput.ts` for hex-encoded payloads rather than reinventing the
+  branch.
+- **PREFER** `runWithWallet<string>(ctx.client, (wallet) => ...)` for any
+  command that needs a wallet handle — it wraps `client.withWallet` and maps
+  `NativeError` to a formatted string. Pass the explicit `<string>` type
+  argument so `ok(...)` infers `Result<string, string>`, not
+  `Result<unknown, string>`.
+- **MUST** use method-syntax methods on `Command` (`describe()`, `parse()`,
+  `run()`) rather than arrow-function properties. The interface uses bivariant
+  method syntax so a heterogeneous `readonly Command[]` registry type-checks;
+  arrow properties would make the registry invariant in `P` and fail to
+  compile.
+- **MUST** reuse shared CLI helpers rather than duplicating parsing:
+  - `parseFlags` (`src/parseFlags.ts`) for `--json`, `--reset`, `--yes`, and
+    `--key value` options.
+  - `parseBytesInput` + `readInput` (`src/bytesInput.ts`) for `--hex` /
+    `--base64` / `--in <file>` byte inputs.
+  - `formatNativeError` / `formatExecutionError` (`src/nativeError.ts`) to
+    render `NativeError` variants — keep the switch on `error.kind` in one
+    place.
+- **PREFER** colocating a parser unit test as `src/commands/<verb>.test.ts`
+  that exercises the failure paths of `parse<Verb>` without loading native
+  code. End-to-end tests that need the dylib live in `e2e/` behind the
+  `MACWLT_E2E=1` guard.
+- **MUST** update `helpText` indirectly via `describe()`: the dispatcher
+  stitches every command's `describe()` into the `macwlt help` output. Do not
+  hand-maintain a separate usage string list.
+
 ## Meta
 
 - **MUST** match an existing convention over introducing a "better" second one. Predictability is the point; a codebase with two conventions is worse than either alone.
