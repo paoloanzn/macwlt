@@ -7,7 +7,7 @@
 
 Native wallet core for macwlt. This package contains the Objective-C implementation,
 the C ABI used by foreign-function interfaces, and the client/server types shared
-across the app and its isolated XPC signing service.
+with its isolated XPC signing service.
 
 This is a private pnpm workspace package, not an npm-distributed JavaScript library.
 Its package scripts delegate native builds and tests to the repository
@@ -20,36 +20,34 @@ Its package scripts delegate native builds and tests to the repository
 - Implement wallet bootstrapping, key derivation, address generation, PSBT handling,
   Ethereum transaction signing, and FROST signing.
 - Keep key material in Secure Enclave-backed storage and hardened memory structures.
-- Provide the native types used by [`@macwlt/ui`](../ui),
-  [`@macwlt/xpc`](../xpc), and [`@macwlt/cli`](../cli).
+- Provide the native types used by [`@macwlt/xpc`](../xpc) and
+  [`@macwlt/cli`](../cli).
 
-The package does not contain an application entry point. The macOS app belongs to
-`@macwlt/ui`, while the signing-service executable and its entitlements belong to
-`@macwlt/xpc`.
+The package does not contain an application entry point. The signing-service
+executable and its entitlements belong to `@macwlt/xpc`.
 
 ## Architecture
 
 ```text
-CLI / native consumer                 macOS app
-          │                               │
-          ▼                               ▼
-      C ABI (macwlt.h)               WalletService
-          └──────────────┬────────────────┘
-                         ▼
-               SigningServiceClient
-                         │
-                    XPC boundary
-                         │
-                         ▼
-                  SigningService
-                         │
-         wallet, FROST, PSBT, and key engines
+CLI / native consumer
+          │
+          ▼
+      C ABI (macwlt.h)
+          │
+          ▼
+ SigningServiceClient
+          │
+     XPC boundary
+          │
+          ▼
+   SigningService
+          │
+ wallet, FROST, PSBT, and key engines
 ```
 
 The standalone `libmacwlt.dylib` contains the C ABI and signing-service client.
 Sensitive operations are performed by the separately built XPC service. Development
-builds can locate the service bundle under `build/`; application builds embed it in
-`macwlt.app/Contents/XPCServices`.
+builds can locate the service bundle under `build/`.
 
 ## Source layout
 
@@ -80,8 +78,8 @@ Build only the client dynamic library:
 pnpm --filter @macwlt/core build
 ```
 
-This produces `build/libmacwlt.dylib`. To also build the XPC signing service, macOS
-application, and CLI, run:
+This produces `build/libmacwlt.dylib`. To also build the XPC signing service, CLI,
+documentation, and landing site, run:
 
 ```shell
 pnpm build

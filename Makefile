@@ -1,22 +1,13 @@
 # Copyright (c) 2026 macwlt contributors.
 # SPDX-License-Identifier: Apache-2.0
 
-TARGET ?= macwlt
-PREFIX ?= /usr/local
-
 CORE_SRC := $(shell find packages/core/src -type f -name '*.m' | sort)
 CLIENT_CORE_SRC := \
 	packages/core/src/SigningServiceClient.m \
 	packages/core/src/macwlt.m
-APP_SRC := \
-	packages/core/src/SigningServiceClient.m \
-	packages/core/src/WalletService.m \
-	packages/core/src/hex.m \
-	packages/ui/src/WalletViewController.m \
-	packages/ui/src/macwlt.m
-SIGNING_SERVICE_SRC := $(filter-out packages/core/src/SigningServiceClient.m packages/core/src/WalletService.m packages/core/src/macwlt.m,$(CORE_SRC)) \
+SIGNING_SERVICE_SRC := $(filter-out packages/core/src/SigningServiceClient.m packages/core/src/macwlt.m,$(CORE_SRC)) \
 	packages/xpc/src/SigningServiceMain.m
-HEADERS := $(shell find packages/core/src packages/ui/src packages/xpc/src -type f -name '*.h' | sort)
+HEADERS := $(shell find packages/core/src packages/xpc/src -type f -name '*.h' | sort)
 TEST_SRCS := $(shell find tests -type f -name '*.m' | sort)
 TEST_CORE_SRCS := \
 	packages/core/src/ARCH2FROSTLibrary.m \
@@ -39,20 +30,14 @@ TEST_CORE_SRCS := \
 	packages/core/src/WalletSigner.m \
 	packages/core/src/WalletShareEnvelope.m
 BUILD_DIR := build
-BIN := $(BUILD_DIR)/$(TARGET)
 LIB := $(BUILD_DIR)/libmacwlt.dylib
 TEST_BUNDLE_NAME := MacwltCoreTests
 TEST_BUNDLE := $(BUILD_DIR)/$(TEST_BUNDLE_NAME).xctest
 TEST_BIN := $(TEST_BUNDLE)/Contents/MacOS/$(TEST_BUNDLE_NAME)
 TEST_INFO_PLIST := tests/MacwltCoreTests-Info.plist
-APP_BUNDLE_ID ?= com.macwlt.App
-APP_BUNDLE := $(BUILD_DIR)/macwlt.app
-APP_BUNDLE_BIN := $(APP_BUNDLE)/Contents/MacOS/$(TARGET)
-APP_INFO_PLIST := packages/ui/src/macwlt-Info.plist
 SIGNING_SERVICE_BUNDLE_ID ?= com.macwlt.SigningService
 SIGNING_SERVICE_BUNDLE := $(BUILD_DIR)/$(SIGNING_SERVICE_BUNDLE_ID).xpc
 SIGNING_SERVICE_BIN := $(SIGNING_SERVICE_BUNDLE)/Contents/MacOS/$(SIGNING_SERVICE_BUNDLE_ID)
-APP_SIGNING_SERVICE_BUNDLE := $(APP_BUNDLE)/Contents/XPCServices/$(SIGNING_SERVICE_BUNDLE_ID).xpc
 SIGNING_SERVICE_INFO_PLIST := packages/xpc/src/com.macwlt.SigningService-Info.plist
 SIGNING_SERVICE_ENTITLEMENTS ?= packages/xpc/src/signing-service.entitlements
 FROST_DIR := vendor/secp256k1-frost
@@ -74,7 +59,6 @@ XKCP_DIR := vendor/XKCP
 XKCP_TARGET ?= generic64
 XKCP_LIB := $(XKCP_DIR)/bin/$(XKCP_TARGET)/libXKCP.a
 # Ad-hoc builds cannot use restricted entitlements; AMFI kills faked ones.
-ENTITLEMENTS ?=
 CODESIGN_IDENTITY ?= -
 CODESIGN_OPTIONS ?=
 
@@ -93,7 +77,7 @@ CPPFLAGS += -DWALLY_ABI_NO_ELEMENTS \
 	-I$(XKCP_DIR)/bin/.build/$(XKCP_TARGET)/libXKCP.a \
 	-I$(XKCP_DIR)/bin/$(XKCP_TARGET)/libXKCP.a.headers
 CFLAGS += $(if $(MACOSX_SDK),-isysroot $(MACOSX_SDK))
-LDLIBS ?= -framework Foundation -framework Security -framework AppKit -framework Cocoa
+LDLIBS ?= -framework Foundation -framework Security
 LDLIBS += $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) -lz
 CODESIGN ?= codesign
 SELECTED_DEVDIR := $(shell xcode-select -p)
@@ -122,20 +106,16 @@ TEST_LDFLAGS := -bundle -ObjC \
 	-framework XCTest \
 	-framework Foundation \
 	-framework Security \
-	-framework AppKit \
-	-framework Cocoa \
 	-Wl,-rpath,$(XCTEST_FRAMEWORKS)
 XCTEST_FILTER := $(if $(FILTER),-XCTest $(FILTER),)
 
-.PHONY: build core test install clean submodules signing-service app-bundle
+.PHONY: build core test clean submodules signing-service
 
-build: core signing-service app-bundle
+build: core signing-service
 
 core: $(LIB)
 
 signing-service: $(SIGNING_SERVICE_BIN)
-
-app-bundle: $(APP_BUNDLE_BIN) $(APP_SIGNING_SERVICE_BUNDLE)
 
 test: $(TEST_BIN)
 	$(XCTEST) $(XCTEST_FILTER) $(TEST_BUNDLE)
@@ -188,11 +168,6 @@ $(SIGNING_SERVICE_FROST_DYLIB): $(FROST_DYLIB)
 	mkdir -p $(SIGNING_SERVICE_FRAMEWORKS)
 	cp $(FROST_DYLIB) $@
 
-$(BIN): $(APP_SRC) $(HEADERS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) $(ENTITLEMENTS)
-	@mkdir -p $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(APP_SRC) $(LDLIBS)
-	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS)) $@
-
 $(LIB): $(CLIENT_CORE_SRC) $(HEADERS)
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -I. $(CFLAGS) $(LDFLAGS) -dynamiclib -install_name @rpath/libmacwlt.dylib -o $@ $(CLIENT_CORE_SRC) -framework Foundation
@@ -204,24 +179,10 @@ $(SIGNING_SERVICE_BIN): $(SIGNING_SERVICE_SRC) $(HEADERS) $(SIGNING_SERVICE_INFO
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -Wl,-rpath,@executable_path/../Frameworks -o $@ $(SIGNING_SERVICE_SRC) $(LDLIBS)
 	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(if $(filter-out -,$(CODESIGN_IDENTITY)),--entitlements $(SIGNING_SERVICE_ENTITLEMENTS)) $(SIGNING_SERVICE_BUNDLE)
 
-$(APP_BUNDLE_BIN): $(BIN) $(APP_INFO_PLIST)
-	@mkdir -p $(APP_BUNDLE)/Contents/MacOS
-	cp $(APP_INFO_PLIST) $(APP_BUNDLE)/Contents/Info.plist
-	cp $(BIN) $@
-
-$(APP_SIGNING_SERVICE_BUNDLE): $(SIGNING_SERVICE_BIN) $(APP_BUNDLE_BIN)
-	@mkdir -p $(APP_BUNDLE)/Contents/XPCServices
-	ditto $(SIGNING_SERVICE_BUNDLE) $@
-	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(APP_BUNDLE)
-
 $(TEST_BIN): $(TEST_SRCS) $(TEST_CORE_SRCS) $(HEADERS) $(TEST_INFO_PLIST) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) $(FROST_DYLIB)
 	@mkdir -p $(dir $@)
 	cp $(TEST_INFO_PLIST) $(TEST_BUNDLE)/Contents/Info.plist
 	$(CC) $(TEST_CPPFLAGS) $(TEST_CFLAGS) $(TEST_LDFLAGS) $(LDFLAGS) -o $@ $(TEST_SRCS) $(TEST_CORE_SRCS) $(LDLIBS)
-
-install: build
-	install -d $(DESTDIR)$(PREFIX)/bin
-	install $(BIN) $(DESTDIR)$(PREFIX)/bin/$(TARGET)
 
 clean:
 	rm -rf $(BUILD_DIR)

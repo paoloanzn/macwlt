@@ -90,15 +90,6 @@ importers:
 
   packages/core: {}
 
-  packages/ui:
-    dependencies:
-      '@macwlt/core':
-        specifier: workspace:*
-        version: link:../core
-      '@macwlt/xpc':
-        specifier: workspace:*
-        version: link:../xpc
-
   packages/xpc:
     dependencies:
       '@macwlt/core':

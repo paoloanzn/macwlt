@@ -4,7 +4,7 @@ CompileFlags:
     - -DENABLE_MODULE_FROST_BIP340_MODE
 ---
 If:
-  PathMatch: packages/(core|ui|xpc)/src/.*
+  PathMatch: packages/(core|xpc)/src/.*
 CompileFlags:
   Add:
     - -I../../core/src

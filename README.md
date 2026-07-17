@@ -8,21 +8,22 @@
 Self-custodial wallet infrastructure for macOS, backed by Secure Enclave signing.
 
 macwlt keeps private-key operations on the local Mac and exposes a small native core,
-an XPC signing service, a macOS app bundle, and a TypeScript CLI for wallet creation,
-public-key/address export, and transaction signing.
+an XPC signing service, and a TypeScript CLI for wallet creation, public-key/address
+export, and transaction signing.
 
 ## Repository
 
 - `packages/core/`: Objective-C wallet core, C ABI, signing, address derivation, and storage.
 - `packages/xpc/`: XPC signing service used to isolate signing operations.
-- `packages/ui/`: native macOS app entry point and wallet view controller.
 - `packages/cli/`: TypeScript command-line interface and Bun FFI adapter.
+- `apps/docs/`: VitePress documentation site.
+- `apps/landing/`: React landing site.
 - `tests/`: XCTest coverage for the native core and signing boundaries.
 - `vendor/`: native cryptography dependencies pulled in as submodules.
 
-The four product packages are pnpm workspace members. Native packages keep their
-Objective-C sources in `src/` and expose Make-backed workspace scripts; the CLI uses
-pnpm for dependency management and Bun as its runtime.
+The three product packages and two web apps are pnpm workspace members. Native
+packages keep their Objective-C sources in `src/` and expose Make-backed workspace
+scripts; the CLI uses pnpm for dependency management and Bun as its runtime.
 
 ## Development
 
