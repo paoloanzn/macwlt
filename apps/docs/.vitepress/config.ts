@@ -1,22 +1,25 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
-  title: 'macwlt Docs',
-  description: 'Documentation for macwlt.',
+  title: 'macwlt',
+  description: 'macwlt',
   lang: 'en-US',
   outDir: 'dist',
   srcExclude: ['AGENTS.md'],
   cleanUrls: true,
   head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
+    [
+      'link',
+      { rel: 'icon', type: 'image/svg+xml', href: '/macwlt-logo.svg' },
+    ],
   ],
   vite: {
     publicDir: '../landing/public',
   },
   themeConfig: {
-    nav: [{ text: 'Home', link: '/' }],
-    socialLinks: [
-      { icon: 'github', link: 'https://github.com/paoloanzn/macwlt' },
-    ],
+    logo: {
+      src: '/macwlt-logo.svg',
+      alt: 'macwlt',
+    },
   },
 })
