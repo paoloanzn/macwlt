@@ -7,6 +7,7 @@ import { signEthCommand } from "./commands/signEth";
 import { signPsbtCommand } from "./commands/signPsbt";
 import { helpCommand } from "./commands/help";
 import { versionCommand } from "./commands/version";
+import { sendCommand } from "./commands/send";
 
 export const commands: readonly Command[] = [
   createCommand,
@@ -15,6 +16,7 @@ export const commands: readonly Command[] = [
   addressCommand,
   signEthCommand,
   signPsbtCommand,
+  sendCommand,
   helpCommand,
   versionCommand,
 ];

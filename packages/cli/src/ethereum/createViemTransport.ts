@@ -7,7 +7,8 @@ import {
 } from "viem";
 import type { EthereumConfig } from "./EthereumConfig";
 import type { EvmBlockTag, EvmCallRequest } from "./EvmCall";
-import type { EvmCallTransport } from "./EthereumClient";
+import type { EvmTransport } from "./EthereumClient";
+import type { EvmTransactionRequest } from "./EvmTransaction";
 
 export type ViemTransportOptions = {
   readonly fetchFn?: HttpTransportConfig["fetchFn"];
@@ -16,7 +17,7 @@ export type ViemTransportOptions = {
 export function createViemTransport(
   config: EthereumConfig,
   options: ViemTransportOptions = {},
-): EvmCallTransport {
+): EvmTransport {
   const chain = defineChain({
     id: config.chainId,
     name: `Chain ${config.chainId}`,
@@ -32,6 +33,31 @@ export function createViemTransport(
     async call(request: EvmCallRequest): Promise<unknown> {
       const response = await client.call(toViemCallParameters(request));
       return { data: response.data };
+    },
+    async getChainId(): Promise<unknown> {
+      return await client.getChainId();
+    },
+    async getTransactionCount(address: string): Promise<unknown> {
+      return await client.getTransactionCount({
+        address: address as `0x${string}`,
+        blockTag: "pending",
+      });
+    },
+    async estimateGas(request: EvmTransactionRequest): Promise<unknown> {
+      return await client.estimateGas({
+        account: request.from,
+        to: request.to,
+        data: request.data,
+        value: request.value,
+      });
+    },
+    async getGasPrice(): Promise<unknown> {
+      return await client.getGasPrice();
+    },
+    async sendRawTransaction(transaction: string): Promise<unknown> {
+      return await client.sendRawTransaction({
+        serializedTransaction: transaction as `0x${string}`,
+      });
     },
   };
 }

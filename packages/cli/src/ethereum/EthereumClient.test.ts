@@ -105,6 +105,15 @@ describe("EthereumClient", () => {
       error: { kind: "transport-failed", cause },
     });
   });
+
+  test("reports missing transaction transport capability", async () => {
+    const client = createClient(successfulTransport());
+
+    expect(await client.verifyChain()).toEqual({
+      ok: false,
+      error: { kind: "unsupported-transport" },
+    });
+  });
 });
 
 function createClient(transport: EvmCallTransport): EthereumClient {
