@@ -1,0 +1,13 @@
+#root {
+  width: min(100% - 2rem, 72rem);
+  margin-inline: auto;
+}
+
+main {
+  display: grid;
+  min-height: 100svh;
+  place-content: center;
+  justify-items: center;
+  gap: 1rem;
+  text-align: center;
+}

@@ -12,6 +12,10 @@
   "scripts": {
     "build": "pnpm -r --workspace-concurrency=1 build",
     "dev": "pnpm --filter @macwlt/cli dev",
+    "dev:docs": "pnpm --filter @macwlt/docs dev",
+    "dev:landing": "pnpm --filter @macwlt/landing dev",
+    "build:docs": "pnpm --filter @macwlt/docs build",
+    "build:landing": "pnpm --filter @macwlt/landing build",
     "test": "pnpm -r --workspace-concurrency=1 test",
     "test:e2e": "pnpm run build && pnpm --filter @macwlt/cli test:e2e",
     "typecheck": "pnpm -r typecheck"
