@@ -9,3 +9,4 @@ export { parseBytesInput, readInput, type BytesInput } from "./bytesInput";
 export { formatNativeError, formatExecutionError } from "./nativeError";
 export { formatDataOutput, formatPsbt, type PsbtTextFormat } from "./walletOutput";
 export { runWithWallet } from "./withWallet";
+export * from "./ethereum";

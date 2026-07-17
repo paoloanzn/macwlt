@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@macwlt/core": "workspace:*",
+    "viem": "^2.55.2",
     "zod": "^3.25.76"
   },
   "devDependencies": {
