@@ -9,6 +9,10 @@ importers:
   .: {}
 
   apps/docs:
+    dependencies:
+      '@macwlt/design-system':
+        specifier: workspace:*
+        version: link:../../packages/design-system
     devDependencies:
       vitepress:
         specifier: ^1.6.4
@@ -22,6 +26,9 @@ importers:
 
   apps/landing:
     dependencies:
+      '@macwlt/design-system':
+        specifier: workspace:*
+        version: link:../../packages/design-system
       react:
         specifier: ^19.2.6
         version: 19.2.7
@@ -89,6 +96,22 @@ importers:
         version: 5.9.3
 
   packages/core: {}
+
+  packages/design-system:
+    dependencies:
+      react:
+        specifier: '>=18'
+        version: 19.2.7
+      react-dom:
+        specifier: '>=18'
+        version: 19.2.7(react@19.2.7)
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.14
+        version: 19.2.17
+      typescript:
+        specifier: ~6.0.2
+        version: 6.0.3
 
   packages/xpc:
     dependencies:

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img">
+  <title>macwlt segmented ring</title>
+  <g
+    transform="translate(200 200)"
+    fill="none"
+    stroke-linecap="butt"
+  >
+    <path
+      d="M-150 0A150 150 0 0 1 45.9-142.8"
+      stroke="#3ddc60"
+      stroke-width="30"
+    />
+    <path
+      d="M60.2-137.4A150 150 0 0 1 137.4-60.2"
+      stroke="#6d4aff"
+      stroke-width="30"
+    />
+    <path
+      d="M145.6-35.9A150 150 0 0 1 22.3 148.3"
+      stroke="#8fdfa4"
+      stroke-width="30"
+    />
+    <path
+      d="M7.8 149.8A150 150 0 0 1-148.3 22.3"
+      stroke="#4ea56a"
+      stroke-width="30"
+    />
+  </g>
+</svg>

@@ -1,0 +1,38 @@
+:root {
+  --mw-bg: #121c17;
+  --mw-surface: #192a20;
+  --mw-on-surface: #e2e9e5;
+  --mw-btn: #0d0d0d;
+
+  --mw-ink: #e8edea;
+  --mw-heading: #f2f7f5;
+  --mw-muted: #a8bdb2;
+  --mw-muted-dim: #7c9889;
+
+  --mw-accent: #3eea8d;
+  --mw-accent-ink: #151515;
+
+  --mw-c1: #e08be4;
+  --mw-c1-ink: #551858;
+  --mw-c2: #e48b8f;
+  --mw-c2-ink: #58181b;
+  --mw-c2-soft: #f5d6d7;
+  --mw-c3: #8be4e3;
+  --mw-c3-ink: #185858;
+  --mw-c4: #371517;
+  --mw-c4-ink: #eddede;
+  --mw-c4-muted: #b58789;
+
+  --mw-font-display: 'Anton', sans-serif;
+  --mw-font-body: 'DM Sans', sans-serif;
+  --mw-font-mono: 'DM Mono', monospace;
+  --mw-fw-display: 400;
+
+  --mw-radius-card: 34px;
+  --mw-radius-lg: 40px;
+  --mw-radius-band: 20px;
+  --mw-radius-chip: 18px;
+  --mw-radius-pill: 100px;
+
+  --mw-shadow-panel: 0 24px 80px rgb(0 0 0 / 35%);
+}
