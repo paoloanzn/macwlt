@@ -1,6 +1,8 @@
 CompileFlags:
   Add:
     - -DWALLY_ABI_NO_ELEMENTS
+    - -DENABLE_MODULE_FROST_BIP340_MODE
+    - -Ivendor/secp256k1-frost/include
     - -Ivendor/libwally-core/include
     - -Ivendor/libwally-core/src/secp256k1/include
     - -Ivendor/XKCP/bin/.build/generic64/libXKCP.a
@@ -10,6 +12,7 @@ If:
   PathMatch: src/.*
 CompileFlags:
   Add:
+    - -I../../vendor/secp256k1-frost/include
     - -I../../vendor/libwally-core/include
     - -I../../vendor/libwally-core/src/secp256k1/include
     - -I../../vendor/XKCP/bin/.build/generic64/libXKCP.a
@@ -22,6 +25,7 @@ CompileFlags:
     - -F/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks
     - -iframework
     - /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks
+    - -I../vendor/secp256k1-frost/include
     - -I../vendor/libwally-core/include
     - -I../vendor/libwally-core/src/secp256k1/include
     - -I../vendor/XKCP/bin/.build/generic64/libXKCP.a
