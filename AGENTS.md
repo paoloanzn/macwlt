@@ -3,15 +3,9 @@
 
 ## Package Instructions
 
-Before working on a package, read and follow its package-specific agent guide:
-
-- [Core agent guide](packages/core/AGENTS.md)
-- [CLI agent guide](packages/cli/AGENTS.md)
-- [UI agent guide](packages/ui/AGENTS.md)
-- [XPC agent guide](packages/xpc/AGENTS.md)
-
-Read every applicable guide when a change spans multiple packages. Changes to the
-root native test suite follow the core agent guide.
+Before working in a subpackage, find and follow the `AGENTS.md` file in that
+subpackage. Read every applicable guide when a change spans multiple subpackages.
+Changes to the root native test suite follow the core subpackage guide.
 
 ## Commits
 - Use this commit message format when the user explicitly asks for a commit:
