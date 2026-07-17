@@ -5,6 +5,7 @@ export default defineConfig({
   description: 'Documentation for macwlt.',
   lang: 'en-US',
   outDir: 'dist',
+  srcExclude: ['AGENTS.md'],
   cleanUrls: true,
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
