@@ -12,7 +12,8 @@
     "macwlt": "./dist/main.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "config.default.json"
   ],
   "scripts": {
     "build": "tsup",

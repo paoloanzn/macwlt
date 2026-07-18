@@ -1,6 +1,7 @@
 import type { Command } from "./command";
 import { createCommand } from "./commands/create";
 import { resetCommand } from "./commands/reset";
+import { resetConfigCommand } from "./commands/resetConfig";
 import { pubkeyCommand } from "./commands/pubkey";
 import { addressCommand } from "./commands/address";
 import { signEthCommand } from "./commands/signEth";
@@ -13,6 +14,7 @@ import { balanceCommand } from "./commands/balance";
 export const commands: readonly Command[] = [
   createCommand,
   resetCommand,
+  resetConfigCommand,
   pubkeyCommand,
   addressCommand,
   balanceCommand,

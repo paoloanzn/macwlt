@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  createFileIfAbsent,
+  ensureGlobalConfig,
+  fileConfigStorage,
+  type ConfigStorage,
+} from "./config";
 import { defaultLibraryPath, openNativeClient, type NativeClient, type NativeError } from "./native";
 import { formatNativeError } from "./nativeError";
 import { err, type Result } from "./result";
@@ -10,7 +16,10 @@ function parsedEnv(value: { [key: string]: unknown }): NodeJS.ProcessEnv {
 
 const cliInputSchema = z.object({
   args: z.array(z.string()),
-  env: z.object({ MACWLT_LIB: z.string().optional() }).passthrough(),
+  env: z.object({
+    HOME: z.string().optional(),
+    MACWLT_LIB: z.string().optional(),
+  }).passthrough(),
 });
 
 export const cliVersion = "0.1.0";
@@ -21,10 +30,14 @@ export type CliResult = {
   readonly stderr: string;
 };
 
+export type CommandHook =
+  () => Result<void, string> | Promise<Result<void, string>>;
+
 export interface Command<P = unknown> {
   readonly name: string;
   readonly aliases?: readonly string[];
   readonly needsClient?: boolean;
+  readonly beforeRun?: CommandHook;
   describe(): string;
   parse(args: readonly string[]): Result<P, string>;
   run(ctx: CommandContext, parsed: P): Promise<Result<string, string>>;
@@ -34,15 +47,34 @@ export interface CommandContext {
   readonly env: NodeJS.ProcessEnv;
   readonly client: NativeClient;
   readonly registry: readonly Command[];
+  readonly configStorage: ConfigStorage;
 }
+
+export type RunCliOptions = {
+  readonly configStorage?: ConfigStorage;
+  readonly createConfigFile?: typeof createFileIfAbsent;
+};
 
 export async function runCli(
   args: readonly string[],
   env: NodeJS.ProcessEnv = process.env,
   registry: readonly Command[] = commands,
+  options: RunCliOptions = {},
 ): Promise<CliResult> {
   const input = cliInputSchema.safeParse({ args: [...args], env });
   if (!input.success) return failure("invalid process input");
+
+  const processEnv = parsedEnv(input.data.env);
+  const configStorage = options.configStorage ?? fileConfigStorage;
+  const initialized = await ensureGlobalConfig({
+    homeDirectory: processEnv.HOME?.length ? processEnv.HOME : undefined,
+    createFile: options.createConfigFile,
+  });
+  if (!initialized.ok) {
+    return failure(
+      `failed to initialize config ${initialized.error.path}: ${messageFromUnknown(initialized.error.cause)}`,
+    );
+  }
 
   const [name, ...rest] = input.data.args;
   if (!name) return success(helpText(registry));
@@ -54,7 +86,12 @@ export async function runCli(
   if (!parsed.ok) return failure(parsed.error);
 
   if (command.needsClient === false) {
-    const ctx: CommandContext = { env: parsedEnv(input.data.env), client: neverClient(), registry };
+    const ctx: CommandContext = {
+      env: processEnv,
+      client: neverClient(),
+      registry,
+      configStorage,
+    };
     return await runCommand(command, ctx, parsed.value);
   }
 
@@ -63,7 +100,12 @@ export async function runCli(
 
   const client = clientResult.value;
   try {
-    const ctx: CommandContext = { env: parsedEnv(input.data.env), client, registry };
+    const ctx: CommandContext = {
+      env: processEnv,
+      client,
+      registry,
+      configStorage,
+    };
     return await runCommand(command, ctx, parsed.value);
   } finally {
     client.close();
@@ -71,6 +113,10 @@ export async function runCli(
 }
 
 async function runCommand<P>(command: Command<P>, ctx: CommandContext, parsed: P): Promise<CliResult> {
+  if (command.beforeRun !== undefined) {
+    const beforeRun = await command.beforeRun();
+    if (!beforeRun.ok) return failure(beforeRun.error);
+  }
   const result = await command.run(ctx, parsed);
   if (!result.ok) return failure(result.error);
   return success(result.value);
@@ -101,4 +147,8 @@ function success(stdout: string): CliResult {
 
 function failure(stderr: string): CliResult {
   return { exitCode: 1, stdout: "", stderr: `${stderr}\n` };
+}
+
+function messageFromUnknown(value: unknown): string {
+  return value instanceof Error ? value.message : String(value);
 }
