@@ -3,11 +3,13 @@ import { parseFlags } from "../parseFlags";
 import { runWithWallet } from "../withWallet";
 import { formatNativeError } from "../nativeError";
 import type { Command, CommandContext } from "../command";
+import { createConfirmationHook } from "../hooks/createConfirmationHook";
 
 export type ResetArgs = { readonly json: boolean };
 
 export const resetCommand: Command<ResetArgs> = {
   name: "reset",
+  beforeRun: createConfirmationHook(),
   describe(): string {
     return "  macwlt reset --yes [--json]";
   },
