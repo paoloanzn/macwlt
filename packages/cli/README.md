@@ -1,3 +1,7 @@
+<div>
+    <img src="../../assets/macwlt-cli-1200x630.png" />
+</div>
+
 # @macwlt/cli
 
 TypeScript CLI for the macwlt native core.
@@ -8,7 +12,7 @@ The npm package currently supports Apple silicon Macs and requires Bun 1.2 or
 newer:
 
 ```shell
-pnpm add --global @macwlt/cli
+npm i -g @macwlt/cli
 macwlt help
 ```
 
@@ -16,15 +20,18 @@ The package includes `libmacwlt.dylib`, the signing-service XPC bundle, and the
 signing service's native dependency. `MACWLT_LIB` can still override the bundled
 library path for development.
 
-## Publish
+## Commands
 
-Build and sign the native artifacts before publishing:
-
-```shell
-make build CODESIGN_IDENTITY="Developer ID Application: Example (TEAMID)"
-pnpm --filter @macwlt/cli publish --access public
-```
-
-The `prepack` lifecycle builds the TypeScript entry points and stages the native
-artifacts from the repository's `build/` directory. The publish lifecycle also
-runs the CLI typecheck and unit tests.
+| Command | Usage |
+| --- | --- |
+| `create` | `macwlt create [--reset] [--json]` |
+| `reset` | `macwlt reset --yes [--json]` |
+| `reset-config` | `macwlt reset-config [--json]` |
+| `pubkey` | `macwlt pubkey [path] [--json]` |
+| `address` | `macwlt address [path] --type bitcoin\|bitcoin-testnet\|bitcoin-taproot\|bitcoin-taproot-testnet\|ethereum [--json]` |
+| `balance` | `macwlt balance [--path <derivation-path>] [--json]` |
+| `sign-eth` | `macwlt sign-eth --hex <typed-transaction-preimage-hex> [--json]` |
+| `sign-psbt` | `macwlt sign-psbt --base64 <psbt> [--format base64\|hex] [--json]` |
+| `send` | `macwlt send <amount> <token-address\|ETH> <chain-id> <recipient> [--rpc <url>] [--path <derivation-path>] [--json]` |
+| `help` | `macwlt help` |
+| `version` | `macwlt version` |
