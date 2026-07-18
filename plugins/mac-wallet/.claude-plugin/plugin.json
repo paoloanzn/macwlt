@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "mac-wallet",
+  "displayName": "Mac Wallet",
+  "version": "0.1.0",
+  "description": "Safe agent workflows for inspecting balances and sending configured EVM assets with macwlt.",
+  "author": {
+    "name": "macwlt contributors",
+    "url": "https://github.com/paoloanzn/macwlt"
+  },
+  "homepage": "https://github.com/paoloanzn/macwlt/tree/main/plugins/mac-wallet",
+  "repository": "https://github.com/paoloanzn/macwlt",
+  "license": "Apache-2.0",
+  "keywords": [
+    "macwlt",
+    "wallet",
+    "evm",
+    "erc20"
+  ],
+  "skills": "./skills/"
+}

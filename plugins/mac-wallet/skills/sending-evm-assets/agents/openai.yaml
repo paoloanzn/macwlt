@@ -1,0 +1,6 @@
+interface:
+  display_name: "Send EVM Assets"
+  short_description: "Send configured EVM assets safely with macwlt"
+  default_prompt: "Use $sending-evm-assets to send 10 USDC on Base to the specified EVM address."
+policy:
+  allow_implicit_invocation: true

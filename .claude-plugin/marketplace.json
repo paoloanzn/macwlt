@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.schema.json",
+  "name": "macwlt",
+  "owner": {
+    "name": "macwlt contributors"
+  },
+  "description": "Agent skills for the macwlt self-custodial wallet.",
+  "plugins": [
+    {
+      "name": "mac-wallet",
+      "source": "./plugins/mac-wallet",
+      "description": "Safely inspect balances and send configured EVM assets with macwlt.",
+      "category": "finance"
+    }
+  ]
+}

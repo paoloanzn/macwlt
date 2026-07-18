@@ -1,0 +1,34 @@
+{
+  "name": "mac-wallet",
+  "version": "0.1.0",
+  "description": "Safe agent workflows for inspecting balances and sending configured EVM assets with macwlt.",
+  "author": {
+    "name": "macwlt contributors",
+    "url": "https://github.com/paoloanzn/macwlt"
+  },
+  "homepage": "https://github.com/paoloanzn/macwlt/tree/main/plugins/mac-wallet",
+  "repository": "https://github.com/paoloanzn/macwlt",
+  "license": "Apache-2.0",
+  "keywords": [
+    "macwlt",
+    "wallet",
+    "evm",
+    "erc20"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Mac Wallet",
+    "shortDescription": "Send configured EVM assets with macwlt",
+    "longDescription": "Resolve human-friendly networks and assets through macwlt configuration, verify balances, require explicit confirmation, and submit transfers without exposing wallet secrets.",
+    "developerName": "macwlt contributors",
+    "category": "Finance",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/paoloanzn/macwlt",
+    "defaultPrompt": [
+      "Send 10 USDC on Base to <recipient-address>."
+    ]
+  }
+}

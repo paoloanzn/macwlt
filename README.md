@@ -22,6 +22,7 @@ export, and transaction signing.
 - `packages/cli/`: TypeScript command-line interface and Bun FFI adapter.
 - `apps/docs/`: VitePress documentation site.
 - `apps/landing/`: React landing site.
+- `plugins/mac-wallet/`: installable Codex and Claude Code skills for macwlt.
 - `tests/`: XCTest coverage for the native core and signing boundaries.
 - `vendor/`: native cryptography dependencies pulled in as submodules.
 
@@ -70,6 +71,22 @@ pnpm dev -- create --json
 pnpm dev -- address m/84'/0'/0'/0/0 --type bitcoin
 pnpm dev -- sign-psbt --base64 <psbt>
 ```
+
+## Agent Skills
+
+The `mac-wallet` plugin contains guarded workflows for using macwlt through an
+agent. Its first skill resolves requests such as "Send 10 USDC on Base to
+`0x...`", verifies balances, asks for final confirmation, and submits the
+transfer through the CLI.
+
+Install the standalone skill for the detected agent:
+
+```shell
+./install-skill.sh
+```
+
+See [`plugins/mac-wallet/README.md`](plugins/mac-wallet/README.md) for direct
+plugin installation and testing.
 
 ## License
 

@@ -1,0 +1,20 @@
+{
+  "name": "macwlt",
+  "interface": {
+    "displayName": "macwlt"
+  },
+  "plugins": [
+    {
+      "name": "mac-wallet",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mac-wallet"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Finance"
+    }
+  ]
+}
