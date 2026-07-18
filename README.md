@@ -4,7 +4,7 @@
 -->
 
 <div>
-    <img src="assets/macwlt-title-1200x630.png" />
+    <img src="assets/macwlt-1200x630.png" />
 </div>
 
 # macwlt
