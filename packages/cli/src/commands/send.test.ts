@@ -23,7 +23,7 @@ describe("parseSend", () => {
       ok: true,
       value: {
         amount: "1.25",
-        tokenAddress: token,
+        asset: { kind: "erc20", tokenAddress: token },
         chainId: 11155111,
         recipient,
         rpcUrl: "https://ethereum.example/rpc",
@@ -39,6 +39,10 @@ describe("parseSend", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.rpcUrl).toBeUndefined();
+    expect(result.value.asset).toEqual({
+      kind: "erc20",
+      tokenAddress: token,
+    });
     expect(result.value.derivationPath).toBe("m");
   });
 
@@ -49,7 +53,7 @@ describe("parseSend", () => {
     });
     expect(parseSend(["1", "invalid", "1", recipient])).toEqual({
       ok: false,
-      error: "send token-address must be a valid Ethereum address",
+      error: "send token-address must be ETH or a valid Ethereum address",
     });
     expect(parseSend(["1", token, "0", recipient])).toEqual({
       ok: false,
@@ -59,6 +63,14 @@ describe("parseSend", () => {
       ok: false,
       error: "send recipient must be a valid Ethereum address",
     });
+  });
+
+  test("accepts native ETH transfers", () => {
+    const result = parseSend(["0.0005", "ETH", "1", recipient]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.asset).toEqual({ kind: "native-eth" });
   });
 
   test("rejects unsupported options before loading native code", () => {

@@ -7,11 +7,13 @@ import {
   parseEthereumConfig,
   resolveEthereumRpcUrl,
   sendErc20Token,
+  sendNativeEth,
   type Erc20TransactionSigner,
   type EthereumAddress,
   type EthereumCallError,
   type EthereumTransactionError,
   type SendErc20TokenError,
+  type SendNativeEthError,
 } from "../ethereum";
 import { formatNativeError } from "../nativeError";
 import { parseFlags } from "../parseFlags";
@@ -20,7 +22,9 @@ import { runWithWallet } from "../withWallet";
 
 export type SendArgs = {
   readonly amount: string;
-  readonly tokenAddress: EthereumAddress;
+  readonly asset:
+    | { readonly kind: "native-eth" }
+    | { readonly kind: "erc20"; readonly tokenAddress: EthereumAddress };
   readonly chainId: number;
   readonly recipient: EthereumAddress;
   readonly rpcUrl: string | undefined;
@@ -31,7 +35,7 @@ export type SendArgs = {
 export const sendCommand: Command<SendArgs> = {
   name: "send",
   describe(): string {
-    return "  macwlt send <amount> <token-address> <chain-id> <recipient> [--rpc <url>] [--path <derivation-path>] [--json]";
+    return "  macwlt send <amount> <token-address|ETH> <chain-id> <recipient> [--rpc <url>] [--path <derivation-path>] [--json]";
   },
   parse: parseSend,
   async run(ctx: CommandContext, args: SendArgs): Promise<Result<string, string>> {
@@ -48,24 +52,43 @@ export const sendCommand: Command<SendArgs> = {
 
     const signer = ethereumSigner(ctx, args.derivationPath);
     if (!signer.ok) return signer;
-    const sent = await sendErc20Token(ethereumClient.value, signer.value, {
-      tokenAddress: args.tokenAddress,
-      recipient: args.recipient,
-      amount: args.amount,
-    });
-    if (!sent.ok) return err(formatSendError(sent.error));
+    if (args.asset.kind === "native-eth") {
+      const sent = await sendNativeEth(ethereumClient.value, signer.value, {
+        recipient: args.recipient,
+        amount: args.amount,
+      });
+      if (!sent.ok) return err(formatNativeSendError(sent.error));
+      if (!args.json) return ok(sent.value.transactionHash);
+      return ok(JSON.stringify({
+        transactionHash: sent.value.transactionHash,
+        chainId: args.chainId,
+        asset: "ETH",
+        recipient: args.recipient,
+        from: sent.value.from,
+        amount: args.amount,
+        amountWei: sent.value.amountWei.toString(),
+        feeWei: sent.value.feeWei.toString(),
+      }, null, 2));
+    } else {
+      const sent = await sendErc20Token(ethereumClient.value, signer.value, {
+        tokenAddress: args.asset.tokenAddress,
+        recipient: args.recipient,
+        amount: args.amount,
+      });
+      if (!sent.ok) return err(formatSendError(sent.error));
 
-    if (!args.json) return ok(sent.value.transactionHash);
-    return ok(JSON.stringify({
-      transactionHash: sent.value.transactionHash,
-      chainId: args.chainId,
-      tokenAddress: args.tokenAddress,
-      recipient: args.recipient,
-      from: sent.value.from,
-      amount: args.amount,
-      amountBaseUnits: sent.value.amountBaseUnits.toString(),
-      decimals: sent.value.decimals,
-    }, null, 2));
+      if (!args.json) return ok(sent.value.transactionHash);
+      return ok(JSON.stringify({
+        transactionHash: sent.value.transactionHash,
+        chainId: args.chainId,
+        tokenAddress: args.asset.tokenAddress,
+        recipient: args.recipient,
+        from: sent.value.from,
+        amount: args.amount,
+        amountBaseUnits: sent.value.amountBaseUnits.toString(),
+        decimals: sent.value.decimals,
+      }, null, 2));
+    }
   },
 };
 
@@ -86,7 +109,7 @@ export function parseSend(args: readonly string[]): Result<SendArgs, string> {
     }
   }
 
-  const [amount, tokenAddress, chainIdValue, recipient] =
+  const [amount, assetValue, chainIdValue, recipient] =
     flags.value.positionals;
   if (!amount || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(amount)) {
     return err("send amount must be a non-negative decimal number");
@@ -94,8 +117,8 @@ export function parseSend(args: readonly string[]): Result<SendArgs, string> {
   if (/^0(?:\.0+)?$/.test(amount)) {
     return err("send amount must be greater than zero");
   }
-  if (!tokenAddress || !isAddress(tokenAddress)) {
-    return err("send token-address must be a valid Ethereum address");
+  if (!assetValue || (assetValue.toUpperCase() !== "ETH" && !isAddress(assetValue))) {
+    return err("send token-address must be ETH or a valid Ethereum address");
   }
   if (!recipient || !isAddress(recipient)) {
     return err("send recipient must be a valid Ethereum address");
@@ -114,7 +137,9 @@ export function parseSend(args: readonly string[]): Result<SendArgs, string> {
 
   return ok({
     amount,
-    tokenAddress,
+    asset: assetValue.toUpperCase() === "ETH"
+      ? { kind: "native-eth" }
+      : { kind: "erc20", tokenAddress: assetValue as EthereumAddress },
     chainId,
     recipient,
     rpcUrl,
@@ -197,6 +222,25 @@ function formatSendError(error: SendErc20TokenError): string {
       return error.error.kind === "zero-token-amount"
         ? "send amount must be greater than zero"
         : `send amount ${error.error.value} cannot be represented by this token`;
+    case "signing-failed":
+      return `transaction signing failed: ${error.message}`;
+    case "invalid-signature":
+      return error.error.kind === "invalid-signature-length"
+        ? `native wallet returned a ${error.error.actual}-byte Ethereum signature; expected 65`
+        : `native wallet returned invalid Ethereum recovery parity ${error.error.actual}`;
+  }
+}
+
+function formatNativeSendError(error: SendNativeEthError): string {
+  switch (error.kind) {
+    case "chain-client":
+      return `${error.stage} failed: ${formatChainClientError(error.error)}`;
+    case "amount":
+      return error.error.kind === "zero-token-amount"
+        ? "send amount must be greater than zero"
+        : "send ETH amount is invalid";
+    case "insufficient-funds":
+      return `insufficient ETH balance: have ${error.balanceWei} wei, require ${error.requiredWei} wei including gas`;
     case "signing-failed":
       return `transaction signing failed: ${error.message}`;
     case "invalid-signature":

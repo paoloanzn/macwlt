@@ -33,6 +33,9 @@ describe("sendErc20Token", () => {
       async getTransactionCount(_address: string): Promise<unknown> {
         return 3;
       },
+      async getBalance(): Promise<unknown> {
+        return 10n ** 18n;
+      },
       async estimateGas(request: EvmTransactionRequest): Promise<unknown> {
         estimatedRequest = request;
         return 65_000n;
@@ -137,6 +140,9 @@ function successfulTransport(): EvmTransport {
     },
     async getTransactionCount(): Promise<unknown> {
       return 0;
+    },
+    async getBalance(): Promise<unknown> {
+      return 10n ** 18n;
     },
     async estimateGas(): Promise<unknown> {
       return 65_000n;

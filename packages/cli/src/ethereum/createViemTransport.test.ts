@@ -83,6 +83,9 @@ describe("createViemTransport", () => {
     expect(await client.value.getTransactionCount(
       "0x0000000000000000000000000000000000000001",
     )).toEqual({ ok: true, value: 2 });
+    expect(await client.value.getBalance(
+      "0x0000000000000000000000000000000000000001",
+    )).toEqual({ ok: true, value: 1_000_000_000_000_000n });
     expect(await client.value.estimateGas({
       from: "0x0000000000000000000000000000000000000001",
       to: "0x0000000000000000000000000000000000000002",
@@ -100,6 +103,7 @@ describe("createViemTransport", () => {
     expect(methods).toEqual([
       "eth_chainId",
       "eth_getTransactionCount",
+      "eth_getBalance",
       "eth_estimateGas",
       "eth_gasPrice",
       "eth_sendRawTransaction",
@@ -116,6 +120,8 @@ function responseForMethod(
       return "0x7a69";
     case "eth_getTransactionCount":
       return "0x2";
+    case "eth_getBalance":
+      return "0x38d7ea4c68000";
     case "eth_estimateGas":
       return "0xfde8";
     case "eth_gasPrice":

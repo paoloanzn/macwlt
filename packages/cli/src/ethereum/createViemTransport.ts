@@ -43,6 +43,12 @@ export function createViemTransport(
         blockTag: "pending",
       });
     },
+    async getBalance(address: string): Promise<unknown> {
+      return await client.getBalance({
+        address: address as `0x${string}`,
+        blockTag: "pending",
+      });
+    },
     async estimateGas(request: EvmTransactionRequest): Promise<unknown> {
       return await client.estimateGas({
         account: request.from,

@@ -24,6 +24,7 @@ export interface EvmCallTransport {
 export interface EvmTransport extends EvmCallTransport {
   getChainId(): Promise<unknown>;
   getTransactionCount(address: string): Promise<unknown>;
+  getBalance(address: string): Promise<unknown>;
   estimateGas(request: EvmTransactionRequest): Promise<unknown>;
   getGasPrice(): Promise<unknown>;
   sendRawTransaction(transaction: string): Promise<unknown>;
@@ -43,6 +44,7 @@ export type EthereumCallError =
 export type EthereumTransactionOperation =
   | "get-chain-id"
   | "get-transaction-count"
+  | "get-balance"
   | "estimate-gas"
   | "get-gas-price"
   | "send-raw-transaction";
@@ -179,6 +181,19 @@ export class EthereumClient {
     );
   }
 
+  async getBalance(
+    address: string,
+  ): Promise<Result<bigint, EthereumTransactionError>> {
+    if (!addressSchema.safeParse(address).success) {
+      return err({ kind: "invalid-request", message: "invalid Ethereum address" });
+    }
+    return await this.#performTransactionOperation(
+      "get-balance",
+      (transport) => transport.getBalance(address),
+      quantitySchema,
+    );
+  }
+
   async getGasPrice(): Promise<Result<bigint, EthereumTransactionError>> {
     return await this.#performTransactionOperation(
       "get-gas-price",
@@ -232,6 +247,7 @@ function isEvmTransport(transport: EvmCallTransport): transport is EvmTransport 
   const candidate = transport as Partial<EvmTransport>;
   return typeof candidate.getChainId === "function"
     && typeof candidate.getTransactionCount === "function"
+    && typeof candidate.getBalance === "function"
     && typeof candidate.estimateGas === "function"
     && typeof candidate.getGasPrice === "function"
     && typeof candidate.sendRawTransaction === "function";

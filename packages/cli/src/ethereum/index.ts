@@ -55,6 +55,13 @@ export {
   type SendErc20TokenResult,
 } from "./sendErc20Token";
 export {
+  sendNativeEth,
+  type SendNativeEthError,
+  type SendNativeEthInput,
+  type SendNativeEthResult,
+  type SendNativeEthStage,
+} from "./sendNativeEth";
+export {
   serializeSignedTransaction,
   type EthereumSignatureError,
 } from "./serializeSignedTransaction";
