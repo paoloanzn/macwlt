@@ -36,6 +36,8 @@ library path for development.
 | `help` | `macwlt help` |
 | `version` | `macwlt version` |
 
+**IMPORTANT: The first ever run can take up to 1 minute and more.**
+
 ## Tests
 
 `pnpm --filter @macwlt/cli test:e2e` leaves the current wallet intact and skips

@@ -21,6 +21,8 @@ macwlt keeps private-key operations local and exposes a native core, an XPC sign
 npm -g i @macwlt/cli
 ```
 
+**IMPORTANT: The first ever run can take up to 1 minute and more.**
+
 ## Agent Skills
 
 The `mac-wallet` plugin provides guarded agent workflows. Its first skill resolves requests such as "Send 10 USDC on Base to `0x...`", verifies balances, asks for confirmation, and submits via the CLI.
