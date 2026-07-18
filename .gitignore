@@ -7,3 +7,4 @@ node_modules/
 .pnpm-store/
 **/.vitepress/cache/
 .wrangler/
+/packages/core/threshold-ecdsa/target/

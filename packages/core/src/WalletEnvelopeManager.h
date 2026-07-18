@@ -11,6 +11,14 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface WalletEnvelopeManager : NSObject
 
++ (NSData * _Nullable)envelopeWrapData:(NSData *)data
+                              publicKey:(SecKeyRef)publicKey
+                                  error:(NSError * _Nullable * _Nullable)outError;
+
++ (NSMutableData * _Nullable)envelopeUnwrapData:(NSData *)envelope
+                                      privateKey:(SecKeyRef)privateKey
+                                           error:(NSError * _Nullable * _Nullable)outError;
+
 + (NSData * _Nullable)envelopeWrap:(NSData *)secret
                          publicKey:(SecKeyRef)publicKey
                              error:(NSError * _Nullable * _Nullable)outError;

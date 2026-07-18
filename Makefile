@@ -13,6 +13,9 @@ TEST_CORE_SRCS := \
 	packages/core/src/ARCH2FROSTLibrary.m \
 	packages/core/src/ARCH2FROSTSigningEngine.m \
 	packages/core/src/ARCH2FROSTWallet.m \
+	packages/core/src/ARCH2ThresholdECDSALibrary.m \
+	packages/core/src/ARCH2ThresholdECDSASigningEngine.m \
+	packages/core/src/ARCH2ThresholdECDSAWallet.m \
 	packages/core/src/Address.m \
 	packages/core/src/HardenedBuffer.m \
 	packages/core/src/HardenedShareWindow.m \
@@ -58,11 +61,22 @@ WALLY_SECP256K1_LIB := $(WALLY_BUILD_DIR)/src/secp256k1/.libs/libsecp256k1.a
 XKCP_DIR := vendor/XKCP
 XKCP_TARGET ?= generic64
 XKCP_LIB := $(XKCP_DIR)/bin/$(XKCP_TARGET)/libXKCP.a
+THRESHOLD_ECDSA_DIR := packages/core/threshold-ecdsa
+THRESHOLD_ECDSA_TARGET_DIR := $(BUILD_DIR)/threshold-ecdsa
+THRESHOLD_ECDSA_LIB := $(THRESHOLD_ECDSA_TARGET_DIR)/release/libmacwlt_threshold_ecdsa.a
+THRESHOLD_ECDSA_SRCS := \
+	$(THRESHOLD_ECDSA_DIR)/Cargo.toml \
+	$(THRESHOLD_ECDSA_DIR)/Cargo.lock \
+	$(shell find $(THRESHOLD_ECDSA_DIR)/src -type f -name '*.rs' | sort) \
+	vendor/cggmp24/Cargo.toml \
+	vendor/cggmp24/Cargo.lock \
+	$(shell find vendor/cggmp24 -type f -name '*.rs' | sort)
 # Ad-hoc builds cannot use restricted entitlements; AMFI kills faked ones.
 CODESIGN_IDENTITY ?= -
 CODESIGN_OPTIONS ?=
 
 CC := $(shell xcrun --find clang 2>/dev/null || command -v clang)
+CARGO ?= cargo
 MACOSX_SDK ?= $(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null)
 export SDKROOT := $(MACOSX_SDK)
 CPPFLAGS ?=
@@ -78,7 +92,7 @@ CPPFLAGS += -DWALLY_ABI_NO_ELEMENTS \
 	-I$(XKCP_DIR)/bin/$(XKCP_TARGET)/libXKCP.a.headers
 CFLAGS += $(if $(MACOSX_SDK),-isysroot $(MACOSX_SDK))
 LDLIBS ?= -framework Foundation -framework Security
-LDLIBS += $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) -lz
+LDLIBS += $(THRESHOLD_ECDSA_LIB) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) -lz
 CODESIGN ?= codesign
 SELECTED_DEVDIR := $(shell xcode-select -p)
 FALLBACK_XCODE_DEVDIR ?= /Applications/Xcode.app/Contents/Developer
@@ -145,6 +159,10 @@ $(WALLY_LIB) $(WALLY_SECP256K1_LIB): $(WALLY_BUILD_STAMP)
 $(XKCP_LIB):
 	$(MAKE) -C $(XKCP_DIR) $(XKCP_TARGET)/libXKCP.a
 
+$(THRESHOLD_ECDSA_LIB): $(THRESHOLD_ECDSA_SRCS)
+	CARGO_TARGET_DIR=$(abspath $(THRESHOLD_ECDSA_TARGET_DIR)) \
+		$(CARGO) build --manifest-path $(THRESHOLD_ECDSA_DIR)/Cargo.toml --release --locked
+
 $(FROST_BUILD_STAMP): $(FROST_PATCH) $(shell find $(FROST_DIR) -type f)
 	rm -rf $(FROST_SOURCE_DIR) $(FROST_BUILD_DIR)
 	mkdir -p $(FROST_SOURCE_DIR)
@@ -173,13 +191,13 @@ $(LIB): $(CLIENT_CORE_SRC) $(HEADERS)
 	$(CC) -I. $(CFLAGS) $(LDFLAGS) -dynamiclib -install_name @rpath/libmacwlt.dylib -o $@ $(CLIENT_CORE_SRC) -framework Foundation
 	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $@
 
-$(SIGNING_SERVICE_BIN): $(SIGNING_SERVICE_SRC) $(HEADERS) $(SIGNING_SERVICE_INFO_PLIST) $(SIGNING_SERVICE_ENTITLEMENTS) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) $(SIGNING_SERVICE_FROST_DYLIB)
+$(SIGNING_SERVICE_BIN): $(SIGNING_SERVICE_SRC) $(HEADERS) $(SIGNING_SERVICE_INFO_PLIST) $(SIGNING_SERVICE_ENTITLEMENTS) $(THRESHOLD_ECDSA_LIB) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) $(SIGNING_SERVICE_FROST_DYLIB)
 	@mkdir -p $(SIGNING_SERVICE_BUNDLE)/Contents/MacOS
 	cp $(SIGNING_SERVICE_INFO_PLIST) $(SIGNING_SERVICE_BUNDLE)/Contents/Info.plist
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -Wl,-rpath,@executable_path/../Frameworks -o $@ $(SIGNING_SERVICE_SRC) $(LDLIBS)
 	$(CODESIGN) --force $(CODESIGN_OPTIONS) --sign $(CODESIGN_IDENTITY) $(if $(filter-out -,$(CODESIGN_IDENTITY)),--entitlements $(SIGNING_SERVICE_ENTITLEMENTS)) $(SIGNING_SERVICE_BUNDLE)
 
-$(TEST_BIN): $(TEST_SRCS) $(TEST_CORE_SRCS) $(HEADERS) $(TEST_INFO_PLIST) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) $(FROST_DYLIB)
+$(TEST_BIN): $(TEST_SRCS) $(TEST_CORE_SRCS) $(HEADERS) $(TEST_INFO_PLIST) $(THRESHOLD_ECDSA_LIB) $(WALLY_LIB) $(WALLY_SECP256K1_LIB) $(XKCP_LIB) $(FROST_DYLIB)
 	@mkdir -p $(dir $@)
 	cp $(TEST_INFO_PLIST) $(TEST_BUNDLE)/Contents/Info.plist
 	$(CC) $(TEST_CPPFLAGS) $(TEST_CFLAGS) $(TEST_LDFLAGS) $(LDFLAGS) -o $@ $(TEST_SRCS) $(TEST_CORE_SRCS) $(LDLIBS)

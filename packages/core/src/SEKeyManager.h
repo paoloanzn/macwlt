@@ -15,6 +15,8 @@ typedef NS_ENUM(NSInteger, SEKeyPurpose) {
     SEKeyPurposeSigningShareB,
     SEKeyPurposeARCH2ShareA,
     SEKeyPurposeARCH2ShareB,
+    SEKeyPurposeARCH2ThresholdECDSAShareA,
+    SEKeyPurposeARCH2ThresholdECDSAShareB,
 };
 
 @interface SEKeyManager : NSObject

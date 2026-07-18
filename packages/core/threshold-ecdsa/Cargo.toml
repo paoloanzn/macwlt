@@ -1,0 +1,19 @@
+[package]
+name = "macwlt-threshold-ecdsa"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+name = "macwlt_threshold_ecdsa"
+crate-type = ["staticlib"]
+
+[dependencies]
+cggmp24 = { path = "../../../vendor/cggmp24/cggmp24", features = ["curve-secp256k1"] }
+generic-ec = "=0.5.0"
+rand = "0.8"
+round-based = { version = "0.4.1", features = ["sim"] }
+serde_json = "1"
+sha3 = "0.10"
+zeroize = "1"

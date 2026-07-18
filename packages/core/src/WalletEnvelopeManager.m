@@ -27,6 +27,7 @@ typedef NS_ENUM(NSInteger, WalletEnvelopeErrorCode) {
     WalletEnvelopeErrorInvalidDigestLength,
     WalletEnvelopeErrorSigningFailed,
     WalletEnvelopeErrorDerivationFailed,
+    WalletEnvelopeErrorInvalidPlaintext,
 };
 
 static SecKeyAlgorithm envelopeAlgorithm(void) {
@@ -139,11 +140,14 @@ static NSMutableData *decryptEnvelope(NSData *envelope,
 
 @implementation WalletEnvelopeManager
 
-+ (NSData *)envelopeWrap:(NSData *)secret
-               publicKey:(SecKeyRef)publicKey
-                   error:(NSError **)outError {
-    if (!validateSecp256k1Secret(secret, outError)) return nil;
-
++ (NSData *)envelopeWrapData:(NSData *)data
+                    publicKey:(SecKeyRef)publicKey
+                        error:(NSError **)outError {
+    if (data.length == 0) {
+        setError(outError, WalletEnvelopeErrorInvalidPlaintext,
+                 @"Envelope plaintext must not be empty");
+        return nil;
+    }
     SecKeyAlgorithm algorithm = envelopeAlgorithm();
     if (!publicKey || !SecKeyIsAlgorithmSupported(publicKey,
                                                   kSecKeyOperationTypeEncrypt,
@@ -157,19 +161,41 @@ static NSMutableData *decryptEnvelope(NSData *envelope,
     NSData *envelope = CFBridgingRelease(SecKeyCreateEncryptedData(
         publicKey,
         algorithm,
-        (__bridge CFDataRef)secret,
+        (__bridge CFDataRef)data,
         &error
     ));
     if (!envelope) setCFError(outError, error);
     return envelope;
 }
 
++ (NSMutableData *)envelopeUnwrapData:(NSData *)envelope
+                            privateKey:(SecKeyRef)privateKey
+                                 error:(NSError **)outError {
+    NSMutableData *plain = decryptEnvelope(envelope, privateKey, outError);
+    if (!plain) return nil;
+    if (plain.length == 0) {
+        secureClearMutableData(plain);
+        setError(outError, WalletEnvelopeErrorInvalidPlaintext,
+                 @"Envelope plaintext must not be empty");
+        return nil;
+    }
+    return plain;
+}
+
++ (NSData *)envelopeWrap:(NSData *)secret
+               publicKey:(SecKeyRef)publicKey
+                   error:(NSError **)outError {
+    if (!validateSecp256k1Secret(secret, outError)) return nil;
+    return [self envelopeWrapData:secret publicKey:publicKey error:outError];
+}
+
 + (NSMutableData *)envelopeUnwrap:(NSData *)envelope
                         privateKey:(SecKeyRef)privateKey
                             error:(NSError **)outError {
-    NSMutableData *secret = decryptEnvelope(envelope, privateKey, outError);
+    NSMutableData *secret = [self envelopeUnwrapData:envelope
+                                          privateKey:privateKey
+                                               error:outError];
     if (!secret) return nil;
-
     if (!validateSecp256k1Secret(secret, outError)) {
         secureClearMutableData(secret);
         return nil;

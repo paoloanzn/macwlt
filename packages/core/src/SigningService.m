@@ -8,6 +8,8 @@
 
 #import "ARCH2FROSTSigningEngine.h"
 #import "ARCH2FROSTWallet.h"
+#import "ARCH2ThresholdECDSASigningEngine.h"
+#import "ARCH2ThresholdECDSAWallet.h"
 #import "Address.h"
 #import "SEKeyManager.h"
 #import "WalletShareEnvelope.h"
@@ -88,11 +90,6 @@ static macwlt_err_t errorForSignerError(NSError *error) {
     return MACWLT_ERR_INTERNAL;
 }
 
-static NSError *signingServiceErrorForSignerError(NSError *error) {
-    macwlt_err_t serviceError = errorForSignerError(error);
-    return signingServiceErrorWithMessage(serviceError, messageForNSError(error));
-}
-
 static BOOL psbtContainsTaprootKeyPath(NSData *data) {
     struct wally_psbt *psbt = NULL;
     int result = wally_psbt_from_bytes(data.bytes,
@@ -144,6 +141,8 @@ static NSString *signingServiceAddressForPublicKey(NSData *publicKey,
 @implementation SigningService {
     id<WalletSigningEngine> _signingEngine;
     ARCH2FROSTSigningEngine *_frostSigningEngine;
+    ARCH2ThresholdECDSASigningEngine *_thresholdECDSASigningEngine;
+    BOOL _walletBootstrapped;
 }
 
 - (nullable instancetype)initWithError:(NSError **)outError {
@@ -162,6 +161,23 @@ static NSString *signingServiceAddressForPublicKey(NSData *publicKey,
     return _frostSigningEngine;
 }
 
+- (nullable ARCH2ThresholdECDSASigningEngine *)
+    thresholdECDSASigningEngineWithError:(NSError **)outError {
+    if (_thresholdECDSASigningEngine) return _thresholdECDSASigningEngine;
+    if (!_walletBootstrapped) {
+        if (outError) {
+            *outError = signingServiceErrorWithMessage(
+                MACWLT_ERR_UNAVAILABLE,
+                @"Wallet material is unavailable"
+            );
+        }
+        return nil;
+    }
+    _thresholdECDSASigningEngine =
+        [ARCH2ThresholdECDSASigningEngine engineWithError:outError];
+    return _thresholdECDSASigningEngine;
+}
+
 - (void)bootstrapWalletWithReply:(SigningServiceBootstrapReply)reply {
     NSParameterAssert(reply);
 
@@ -173,6 +189,7 @@ static NSString *signingServiceAddressForPublicKey(NSData *publicKey,
         return;
     }
 
+    _walletBootstrapped = YES;
     reply(publicKey, nil);
 }
 
@@ -194,9 +211,12 @@ static NSString *signingServiceAddressForPublicKey(NSData *publicKey,
 
     _signingEngine = [[WalletSigner alloc] init];
     _frostSigningEngine = nil;
+    _thresholdECDSASigningEngine = nil;
+    _walletBootstrapped = NO;
     NSArray<NSURL *> *storageURLs = @[
         WalletShareEnvelope.defaultStorageURL,
         ARCH2FROSTWallet.defaultStorageURL,
+        ARCH2ThresholdECDSAWallet.defaultStorageURL,
     ];
     NSError *error = nil;
     for (NSURL *url in storageURLs) {
@@ -251,10 +271,17 @@ static NSString *signingServiceAddressForPublicKey(NSData *publicKey,
     NSParameterAssert(reply);
 
     NSError *error = nil;
-    NSData *signature = [_signingEngine ethereumSignatureForTransaction:transaction
-                                                                  error:&error];
+    ARCH2ThresholdECDSASigningEngine *engine =
+        [self thresholdECDSASigningEngineWithError:&error];
+    NSData *signature =
+        [engine ethereumSignatureForTransaction:transaction error:&error];
     if (!signature) {
-        reply(nil, signingServiceErrorForSignerError(error));
+        macwlt_err_t code =
+            [error.domain isEqualToString:ARCH2ThresholdECDSASigningEngineErrorDomain] &&
+            error.code == ARCH2ThresholdECDSASigningEngineErrorInvalidTransaction
+                ? MACWLT_ERR_INVALID_ARGUMENT
+                : (engine ? MACWLT_ERR_SIGNING_FAILED : MACWLT_ERR_UNAVAILABLE);
+        reply(nil, signingServiceErrorWithMessage(code, messageForNSError(error)));
         return;
     }
     reply(signature, nil);
@@ -291,15 +318,27 @@ static NSString *signingServiceAddressForPublicKey(NSData *publicKey,
     }
 
     NSError *error = nil;
+    BOOL usesThresholdECDSA = addressType == SigningServiceAddressTypeEthereum;
+    if (usesThresholdECDSA && ![derivationPath isEqualToString:@"m"]) {
+        reply(nil, signingServiceErrorWithMessage(
+            MACWLT_ERR_UNSUPPORTED,
+            @"Threshold ECDSA Ethereum signing currently supports the root path m"
+        ));
+        return;
+    }
     BOOL usesFROST = addressType == SigningServiceAddressTypeBitcoinP2TRMainnet ||
         addressType == SigningServiceAddressTypeBitcoinP2TRTestnet;
     ARCH2FROSTSigningEngine *frostEngine = usesFROST
         ? [self frostSigningEngineWithError:&error] : nil;
+    ARCH2ThresholdECDSASigningEngine *thresholdEngine = usesThresholdECDSA
+        ? [self thresholdECDSASigningEngineWithError:&error] : nil;
     NSData *publicKey = usesFROST
         ? [frostEngine publicKeyForDerivationPath:derivationPath error:&error]
-        : [_signingEngine publicKeyForDerivationPath:derivationPath error:&error];
+        : (usesThresholdECDSA
+            ? thresholdEngine.groupPublicKey
+            : [_signingEngine publicKeyForDerivationPath:derivationPath error:&error]);
     if (!publicKey) {
-        macwlt_err_t code = usesFROST
+        macwlt_err_t code = usesFROST || usesThresholdECDSA
             ? MACWLT_ERR_UNAVAILABLE : errorForSignerError(error);
         reply(nil, signingServiceErrorWithMessage(code, messageForNSError(error)));
         return;
