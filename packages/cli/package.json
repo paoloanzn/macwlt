@@ -1,6 +1,6 @@
 {
   "name": "@macwlt/cli",
-  "version": "0.0.1-alpha",
+  "version": "0.0.2-alpha",
   "description": "TypeScript CLI for the macwlt native core",
   "license": "Apache-2.0",
   "type": "module",
@@ -14,7 +14,8 @@
     "bun": ">=1.2.0"
   },
   "bin": {
-    "macwlt": "./dist/main.js"
+    "macwlt": "./dist/main.js",
+    "_macwlt-signing-service": "./native/com.macwlt.SigningService.xpc/Contents/MacOS/com.macwlt.SigningService"
   },
   "exports": {
     ".": {

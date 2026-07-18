@@ -1,5 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import {
+  accessSync,
+  constants,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  rmSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -72,6 +79,14 @@ const missingBundledFiles = requiredBundledFiles.filter(
 if (missingBundledFiles.length > 0) {
   throw new Error(
     `The staged native bundle is incomplete:\n${missingBundledFiles.join("\n")}`,
+  );
+}
+
+try {
+  accessSync(bundledServiceExecutable, constants.X_OK);
+} catch {
+  throw new Error(
+    `The staged signing service is not executable: ${bundledServiceExecutable}`,
   );
 }
 
