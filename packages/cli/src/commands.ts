@@ -8,12 +8,14 @@ import { signPsbtCommand } from "./commands/signPsbt";
 import { helpCommand } from "./commands/help";
 import { versionCommand } from "./commands/version";
 import { sendCommand } from "./commands/send";
+import { balanceCommand } from "./commands/balance";
 
 export const commands: readonly Command[] = [
   createCommand,
   resetCommand,
   pubkeyCommand,
   addressCommand,
+  balanceCommand,
   signEthCommand,
   signPsbtCommand,
   sendCommand,

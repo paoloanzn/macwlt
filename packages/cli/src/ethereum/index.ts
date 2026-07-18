@@ -31,13 +31,28 @@ export {
   type EvmTransactionRequest,
   type TransactionHash,
 } from "./EvmTransaction";
+export {
+  parseEthereumAsset,
+  type EthereumAsset,
+} from "./EthereumAsset";
 export { type LegacyTransaction } from "./LegacyTransaction";
 export {
   decodeErc20Decimals,
   type Erc20DecimalsError,
 } from "./decodeErc20Decimals";
+export {
+  decodeErc20Balance,
+  type Erc20BalanceError,
+} from "./decodeErc20Balance";
+export { encodeErc20BalanceOf } from "./encodeErc20BalanceOf";
 export { encodeErc20DecimalsCall } from "./encodeErc20DecimalsCall";
 export { encodeErc20Transfer } from "./encodeErc20Transfer";
+export {
+  getEthereumAssetBalance,
+  type EthereumAssetBalance,
+  type EthereumAssetBalanceError,
+  type EthereumBalanceStage,
+} from "./getEthereumAssetBalance";
 export {
   parseTokenAmount,
   type TokenAmountError,

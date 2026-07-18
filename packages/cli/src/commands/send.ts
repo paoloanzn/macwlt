@@ -1,20 +1,20 @@
 import { isAddress } from "viem";
 import type { Command, CommandContext } from "../command";
-import { GlobalConfig, type GlobalConfigLoadError } from "../config";
 import {
   EthereumClient,
   createViemTransport,
+  parseEthereumAsset,
   parseEthereumConfig,
-  resolveEthereumRpcUrl,
   sendErc20Token,
   sendNativeEth,
   type Erc20TransactionSigner,
   type EthereumAddress,
-  type EthereumCallError,
-  type EthereumTransactionError,
   type SendErc20TokenError,
   type SendNativeEthError,
 } from "../ethereum";
+import { ethereumWalletAddress } from "./ethereumWalletAddress";
+import { formatEthereumClientError } from "./formatEthereumClientError";
+import { resolveEthereumCommandRpcUrl } from "./resolveEthereumCommandRpcUrl";
 import { formatNativeError } from "../nativeError";
 import { parseFlags } from "../parseFlags";
 import { err, ok, type Result } from "../result";
@@ -39,7 +39,11 @@ export const sendCommand: Command<SendArgs> = {
   },
   parse: parseSend,
   async run(ctx: CommandContext, args: SendArgs): Promise<Result<string, string>> {
-    const rpcUrl = await rpcUrlForCommand(ctx, args);
+    const rpcUrl = await resolveEthereumCommandRpcUrl(
+      ctx.env,
+      args.chainId,
+      args.rpcUrl,
+    );
     if (!rpcUrl.ok) return rpcUrl;
 
     const ethereumClient = EthereumClient.create(
@@ -117,7 +121,11 @@ export function parseSend(args: readonly string[]): Result<SendArgs, string> {
   if (/^0(?:\.0+)?$/.test(amount)) {
     return err("send amount must be greater than zero");
   }
-  if (!assetValue || (assetValue.toUpperCase() !== "ETH" && !isAddress(assetValue))) {
+  if (!assetValue) {
+    return err("send token-address must be ETH or a valid Ethereum address");
+  }
+  const asset = parseEthereumAsset(assetValue);
+  if (!asset.ok) {
     return err("send token-address must be ETH or a valid Ethereum address");
   }
   if (!recipient || !isAddress(recipient)) {
@@ -137,9 +145,7 @@ export function parseSend(args: readonly string[]): Result<SendArgs, string> {
 
   return ok({
     amount,
-    asset: assetValue.toUpperCase() === "ETH"
-      ? { kind: "native-eth" }
-      : { kind: "erc20", tokenAddress: assetValue as EthereumAddress },
+    asset: asset.value,
     chainId,
     recipient,
     rpcUrl,
@@ -148,42 +154,12 @@ export function parseSend(args: readonly string[]): Result<SendArgs, string> {
   });
 }
 
-async function rpcUrlForCommand(
-  ctx: CommandContext,
-  args: SendArgs,
-): Promise<Result<string, string>> {
-  if (args.rpcUrl !== undefined) return ok(args.rpcUrl);
-
-  const homeDirectory = ctx.env.HOME?.length ? ctx.env.HOME : undefined;
-  const loaded = await GlobalConfig.load({ homeDirectory });
-  if (!loaded.ok) return err(formatConfigLoadError(loaded.error));
-  const rpcUrl = resolveEthereumRpcUrl(loaded.value.data, args.chainId);
-  if (!rpcUrl.ok) {
-    const configPath = loaded.value.path;
-    return err(
-      rpcUrl.error.kind === "missing-chain-rpc"
-        ? `no RPC configured for chain ${args.chainId} in ${configPath}; set ethereum.chains.${args.chainId}.rpcUrl or pass --rpc`
-        : `invalid RPC configured for chain ${args.chainId} in ${configPath}`,
-    );
-  }
-  return ok(rpcUrl.value);
-}
-
 function ethereumSigner(
   ctx: CommandContext,
   derivationPath: string,
 ): Result<Erc20TransactionSigner, string> {
-  const address = runWithWallet<string>(ctx.client, (wallet) => {
-    const bootstrapped = wallet.bootstrap();
-    if (!bootstrapped.ok) return err(formatNativeError(bootstrapped.error));
-    const exported = wallet.exportAddress(derivationPath, "ethereum");
-    if (!exported.ok) return err(formatNativeError(exported.error));
-    return ok(exported.value);
-  });
+  const address = ethereumWalletAddress(ctx.client, derivationPath);
   if (!address.ok) return address;
-  if (!isAddress(address.value)) {
-    return err("native wallet returned an invalid Ethereum address");
-  }
 
   return ok({
     address: address.value,
@@ -199,21 +175,10 @@ function ethereumSigner(
   });
 }
 
-function formatConfigLoadError(error: GlobalConfigLoadError): string {
-  switch (error.kind) {
-    case "read-failed":
-      return `failed to read global config ${error.path}: ${messageFromUnknown(error.cause)}`;
-    case "invalid-json":
-      return `invalid JSON in global config ${error.path}: ${error.message}`;
-    case "invalid-config":
-      return `invalid global config ${error.path}: ${error.message}`;
-  }
-}
-
 function formatSendError(error: SendErc20TokenError): string {
   switch (error.kind) {
     case "chain-client":
-      return `${error.stage} failed: ${formatChainClientError(error.error)}`;
+      return `${error.stage} failed: ${formatEthereumClientError(error.error)}`;
     case "missing-token-decimals":
       return "token decimals call returned no data";
     case "token-decimals":
@@ -234,7 +199,7 @@ function formatSendError(error: SendErc20TokenError): string {
 function formatNativeSendError(error: SendNativeEthError): string {
   switch (error.kind) {
     case "chain-client":
-      return `${error.stage} failed: ${formatChainClientError(error.error)}`;
+      return `${error.stage} failed: ${formatEthereumClientError(error.error)}`;
     case "amount":
       return error.error.kind === "zero-token-amount"
         ? "send amount must be greater than zero"
@@ -248,25 +213,4 @@ function formatNativeSendError(error: SendNativeEthError): string {
         ? `native wallet returned a ${error.error.actual}-byte Ethereum signature; expected 65`
         : `native wallet returned invalid Ethereum recovery parity ${error.error.actual}`;
   }
-}
-
-function formatChainClientError(
-  error: EthereumCallError | EthereumTransactionError,
-): string {
-  switch (error.kind) {
-    case "unsupported-transport":
-      return "configured Ethereum transport does not support transactions";
-    case "invalid-request":
-      return error.message;
-    case "transport-failed":
-      return messageFromUnknown(error.cause);
-    case "invalid-response":
-      return error.message;
-    case "chain-mismatch":
-      return `RPC node reports chain ${error.actual}, expected ${error.expected}`;
-  }
-}
-
-function messageFromUnknown(value: unknown): string {
-  return value instanceof Error ? value.message : String(value);
 }
