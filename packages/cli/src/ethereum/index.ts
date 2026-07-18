@@ -54,6 +54,17 @@ export {
   type EthereumBalanceStage,
 } from "./getEthereumAssetBalance";
 export {
+  getEthereumPortfolioBalances,
+  type EthereumPortfolioAssetBalance,
+  type EthereumPortfolioChainBalances,
+} from "./getEthereumPortfolioBalances";
+export {
+  parseEthereumPortfolioConfig,
+  type ConfiguredErc20Asset,
+  type ConfiguredEthereumChain,
+  type EthereumPortfolioConfigError,
+} from "./parseEthereumPortfolioConfig";
+export {
   parseTokenAmount,
   type TokenAmountError,
 } from "./parseTokenAmount";

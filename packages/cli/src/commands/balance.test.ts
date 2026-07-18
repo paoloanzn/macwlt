@@ -19,6 +19,7 @@ describe("parseBalance", () => {
     expect(result).toEqual({
       ok: true,
       value: {
+        kind: "asset",
         asset: { kind: "native-eth" },
         chainId: 1,
         rpcUrl: "https://ethereum.example/rpc",
@@ -34,11 +35,23 @@ describe("parseBalance", () => {
     expect(result).toEqual({
       ok: true,
       value: {
+        kind: "asset",
         asset: { kind: "erc20", tokenAddress: token },
         chainId: 11155111,
         rpcUrl: undefined,
         derivationPath: "m",
         json: false,
+      },
+    });
+  });
+
+  test("parses a zero-argument portfolio overview", () => {
+    expect(parseBalance(["--path", "m/44/60/0/0/0", "--json"])).toEqual({
+      ok: true,
+      value: {
+        kind: "portfolio",
+        derivationPath: "m/44/60/0/0/0",
+        json: true,
       },
     });
   });
@@ -55,6 +68,14 @@ describe("parseBalance", () => {
     expect(parseBalance(["ETH", "1", "--gas", "21000"])).toEqual({
       ok: false,
       error: "unknown balance option: --gas",
+    });
+    expect(parseBalance(["ETH"])).toEqual({
+      ok: false,
+      error: "balance accepts no positionals or requires <ETH|token-address> <chain-id>",
+    });
+    expect(parseBalance(["--rpc", "https://ethereum.example/rpc"])).toEqual({
+      ok: false,
+      error: "balance --rpc requires <ETH|token-address> <chain-id>",
     });
   });
 

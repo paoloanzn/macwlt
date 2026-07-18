@@ -87,6 +87,7 @@ const transactionHashSchema = z.custom<TransactionHash>(
 export class EthereumClient {
   readonly #config: EthereumConfig;
   readonly #transport: EvmCallTransport;
+  #chainVerification: Promise<Result<void, EthereumTransactionError>> | undefined;
 
   private constructor(config: EthereumConfig, transport: EvmCallTransport) {
     this.#config = config;
@@ -134,6 +135,11 @@ export class EthereumClient {
   }
 
   async verifyChain(): Promise<Result<void, EthereumTransactionError>> {
+    this.#chainVerification ??= this.#verifyConfiguredChain();
+    return await this.#chainVerification;
+  }
+
+  async #verifyConfiguredChain(): Promise<Result<void, EthereumTransactionError>> {
     const chainId = await this.#performTransactionOperation(
       "get-chain-id",
       (transport) => transport.getChainId(),
