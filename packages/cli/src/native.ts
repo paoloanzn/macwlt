@@ -55,6 +55,7 @@ export function defaultLibraryPath(envPath: string | undefined): string {
   if (envPath && envPath.length > 0) return resolve(envPath);
 
   const candidates = [
+    resolve(join(import.meta.dir, "../native/libmacwlt.dylib")),
     resolve(join(process.cwd(), "build/libmacwlt.dylib")),
     resolve(join(process.cwd(), "../build/libmacwlt.dylib")),
     resolve(join(import.meta.dir, "../../build/libmacwlt.dylib")),

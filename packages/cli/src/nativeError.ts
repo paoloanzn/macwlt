@@ -3,7 +3,7 @@ import type { NativeError } from "./native";
 export function formatNativeError(error: NativeError): string {
   switch (error.kind) {
     case "missing-library":
-      return `native library not found at ${error.libraryPath}; run make build or set MACWLT_LIB`;
+      return `native library not found at ${error.libraryPath}; reinstall @macwlt/cli, run make build in a checkout, or set MACWLT_LIB`;
     case "load":
       return `failed to load ${error.libraryPath}: ${error.message}`;
     case "wallet-create":

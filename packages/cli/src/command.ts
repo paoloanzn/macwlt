@@ -128,7 +128,7 @@ export function helpText(registry: readonly Command[]): string {
     ...registry.map((c) => c.describe()).filter((line) => line.length > 0),
     "",
     "Environment:",
-    "  MACWLT_LIB  Path to libmacwlt.dylib (default: ./build/libmacwlt.dylib)",
+    "  MACWLT_LIB  Override the bundled or checkout libmacwlt.dylib path",
   ].join("\n");
 }
 

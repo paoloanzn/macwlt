@@ -1,30 +1,48 @@
 {
   "name": "@macwlt/cli",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.0.1-alpha",
   "description": "TypeScript CLI for the macwlt native core",
   "license": "Apache-2.0",
   "type": "module",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
   "engines": {
     "bun": ">=1.2.0"
   },
   "bin": {
     "macwlt": "./dist/main.js"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "native",
     "config.default.json"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "bun run src/main.ts",
+    "stage:native": "node scripts/stage-native.mjs",
+    "prepack": "pnpm run build && pnpm run stage:native",
+    "prepublishOnly": "pnpm run typecheck && pnpm test",
     "start": "bun run dist/main.js",
     "test": "bun test",
     "test:e2e": "MACWLT_E2E=1 MACWLT_E2E_RESET=1 bun test e2e",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@macwlt/core": "workspace:*",
     "viem": "^2.55.2",
     "zod": "^3.25.76"
   },
