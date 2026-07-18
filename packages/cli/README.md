@@ -35,3 +35,13 @@ library path for development.
 | `send` | `macwlt send <amount> <token-address\|ETH> <chain-id> <recipient> [--rpc <url>] [--path <derivation-path>] [--json]` |
 | `help` | `macwlt help` |
 | `version` | `macwlt version` |
+
+## Tests
+
+`pnpm --filter @macwlt/cli test:e2e` leaves the current wallet intact and skips
+the `macwlt reset --yes` case. To run that destructive case, set the opt-in
+before launching the test command:
+
+```shell
+MACWLT_RUN_WALLET_RESET_TESTS=1 pnpm --filter @macwlt/cli test:e2e
+```

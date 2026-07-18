@@ -305,6 +305,13 @@ Run one XCTest class or selector during development:
 make test FILTER=ARCH2ThresholdECDSATests
 ```
 
+The native reset test deletes the current on-device wallet and is skipped by
+default. It runs only when the opt-in is present before `xctest` launches:
+
+```shell
+MACWLT_RUN_WALLET_RESET_TESTS=1 make test FILTER=SigningServiceTests
+```
+
 Tests compile the Objective-C implementation with warnings as errors and cover
 the C ABI, addresses, PSBT behavior, wallet envelopes, hardened memory,
 FROST, threshold ECDSA, routing, reset behavior, and service integration.

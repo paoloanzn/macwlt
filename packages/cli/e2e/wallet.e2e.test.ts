@@ -12,6 +12,10 @@ import {
 } from "./outputSchemas";
 import { psbtForRootPublicKey } from "./psbtFixture";
 
+const walletResetTest = process.env.MACWLT_RUN_WALLET_RESET_TESTS === "1"
+  ? test
+  : test.skip;
+
 if (process.env.MACWLT_E2E !== "1") {
   describe("macwlt cli e2e", () => {
     test.skip("set MACWLT_E2E=1 or run bun run test:e2e to exercise the native wallet CLI", () => {});
@@ -21,10 +25,7 @@ if (process.env.MACWLT_E2E !== "1") {
     test("creates a wallet and exports keys", () => {
       expect(existsSync(nativeLibraryPath), "run make build before bun run test:e2e").toBe(true);
 
-      const createArgs = process.env.MACWLT_E2E_RESET === "1"
-        ? ["create", "--reset", "--json"]
-        : ["create", "--json"];
-      const created = createOutputSchema.parse(jsonCommand(createArgs));
+      const created = createOutputSchema.parse(jsonCommand(["create", "--json"]));
       const pubkey = pubkeyOutputSchema.parse(jsonCommand(["pubkey", "m", "--json"]));
 
       expect(pubkey.publicKey).toBe(created.jointPublicKey);
@@ -64,6 +65,10 @@ if (process.env.MACWLT_E2E !== "1") {
       expect(signedPsbt).toMatch(/^[0-9a-f]+$/);
       expect(signedPsbt.length).toBeGreaterThan(bytesToHex(psbt).length);
       expect(signedPsbt).toContain(`2202${pubkey.publicKey}`);
+    }, 30_000);
+
+    walletResetTest("resets the current wallet when explicitly enabled", () => {
+      expect(jsonCommand(["reset", "--yes", "--json"])).toEqual({ reset: true });
     }, 30_000);
   });
 }

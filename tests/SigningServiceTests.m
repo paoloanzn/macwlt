@@ -83,4 +83,22 @@
     XCTAssertEqual(rootError.code, MACWLT_ERR_UNAVAILABLE);
 }
 
+- (void)testResetDeletesTheCurrentWalletWhenExplicitlyEnabled {
+    XCTSkipUnless(MacwltTestWalletResetTestsEnabled(),
+                  @"Set MACWLT_RUN_WALLET_RESET_TESTS=1 before launching the test run");
+    __block BOOL reset = NO;
+    __block NSError *resetError = nil;
+    __block BOOL replied = NO;
+
+    [self.sut resetWalletWithReply:^(BOOL didReset, NSError *error) {
+        reset = didReset;
+        resetError = error;
+        replied = YES;
+    }];
+
+    XCTAssertTrue(replied);
+    XCTAssertTrue(reset);
+    XCTAssertNil(resetError);
+}
+
 @end

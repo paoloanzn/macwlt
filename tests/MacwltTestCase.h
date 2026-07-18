@@ -20,5 +20,6 @@ NSData *MacwltTestPrivateKeyByMultiplying(NSData *a, NSData *b);
 NSData *MacwltTestPrivateKeyByAdding(NSData *a, NSData *b);
 NSURL *MacwltTestTemporaryFileURL(NSString *name);
 BOOL MacwltTestReadTriggersProtectionFault(volatile uint8_t *address);
+BOOL MacwltTestWalletResetTestsEnabled(void);
 
 NS_ASSUME_NONNULL_END

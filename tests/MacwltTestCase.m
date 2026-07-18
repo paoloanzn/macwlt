@@ -9,6 +9,7 @@
 #include <secp256k1.h>
 #include <setjmp.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <wally_core.h>
@@ -130,4 +131,9 @@ BOOL MacwltTestReadTriggersProtectionFault(volatile uint8_t *address) {
     sigaction(SIGSEGV, &previousSEGV, NULL);
     sigaction(SIGBUS, &previousBUS, NULL);
     return signalNumber == SIGSEGV || signalNumber == SIGBUS;
+}
+
+BOOL MacwltTestWalletResetTestsEnabled(void) {
+    const char *value = getenv("MACWLT_RUN_WALLET_RESET_TESTS");
+    return value && strcmp(value, "1") == 0;
 }
