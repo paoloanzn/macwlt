@@ -15,21 +15,6 @@ macwlt keeps private-key operations on the local Mac and exposes a small native 
 an XPC signing service, and a TypeScript CLI for wallet creation, public-key/address
 export, and transaction signing.
 
-## Repository
-
-- `packages/core/`: Objective-C wallet core, C ABI, signing, address derivation, and storage.
-- `packages/xpc/`: XPC signing service used to isolate signing operations.
-- `packages/cli/`: TypeScript command-line interface and Bun FFI adapter.
-- `apps/docs/`: VitePress documentation site.
-- `apps/landing/`: React landing site.
-- `plugins/mac-wallet/`: installable Codex and Claude Code skills for macwlt.
-- `tests/`: XCTest coverage for the native core and signing boundaries.
-- `vendor/`: native cryptography dependencies pulled in as submodules.
-
-The three product packages and two web apps are pnpm workspace members. Native
-packages keep their Objective-C sources in `src/` and expose Make-backed workspace
-scripts; the CLI uses pnpm for dependency management and Bun as its runtime.
-
 ## Development
 
 Install Node.js 20 or newer, pnpm 10 or newer, and Bun 1.2 or newer. Then install
@@ -59,24 +44,6 @@ Package-scoped commands use pnpm filters:
 pnpm --filter @macwlt/core build
 pnpm --filter @macwlt/cli typecheck
 pnpm --filter @macwlt/cli test
-```
-
-## CLI
-
-Install the Apple silicon npm release with pnpm:
-
-```shell
-pnpm add --global @macwlt/cli
-macwlt help
-```
-
-In a development checkout, the CLI loads `./build/libmacwlt.dylib` by default.
-Set `MACWLT_LIB` to point at a different native build.
-
-```shell
-pnpm dev -- create --json
-pnpm dev -- address m/84'/0'/0'/0/0 --type bitcoin
-pnpm dev -- sign-psbt --base64 <psbt>
 ```
 
 ## Agent Skills
