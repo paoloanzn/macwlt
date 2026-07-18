@@ -63,8 +63,15 @@ pnpm --filter @macwlt/cli test
 
 ## CLI
 
-The CLI loads `./build/libmacwlt.dylib` by default. Set `MACWLT_LIB` to point at a
-different native build.
+Install the Apple silicon npm release with pnpm:
+
+```shell
+pnpm add --global @macwlt/cli
+macwlt help
+```
+
+In a development checkout, the CLI loads `./build/libmacwlt.dylib` by default.
+Set `MACWLT_LIB` to point at a different native build.
 
 ```shell
 pnpm dev -- create --json

@@ -3,7 +3,7 @@
  SPDX-License-Identifier: Apache-2.0
 -->
 
-# `@macwlt/core`
+# @macwlt/core
 
 Native wallet core for macwlt. This package contains the Objective-C implementation,
 the C ABI used by foreign-function interfaces, and the client/server types shared
