@@ -1,7 +1,3 @@
-<div>
-    <img src="../../assets/macwlt-cli-1200x630.png" />
-</div>
-
 # @macwlt/cli
 
 TypeScript CLI for the macwlt native core.

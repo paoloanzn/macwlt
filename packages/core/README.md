@@ -3,10 +3,6 @@
  SPDX-License-Identifier: Apache-2.0
 -->
 
-<div>
-    <img src="../../assets/macwlt-core-1200x630.png" />
-</div>
-
 # @macwlt/core
 
 Native wallet and signing infrastructure for macOS.
