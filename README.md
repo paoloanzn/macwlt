@@ -3,10 +3,6 @@
  SPDX-License-Identifier: Apache-2.0
 -->
 
-<div>
-    <img src="assets/macwlt-thumbnail.png" />
-</div>
-
 # macwlt
 
 Self-custodial wallet infrastructure for macOS, backed by Secure Enclave signing.
